@@ -1,6 +1,8 @@
 import kagglehub
+import os
 
-# Download latest version
+os.environ["KAGGLEHUB_CACHE"] = os.path.dirname(os.path.abspath(__file__))
+
 path = kagglehub.dataset_download("chuneeb/deepfake-detection-dataset-2026")
 
 print("Path to dataset files:", path)
