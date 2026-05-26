@@ -168,7 +168,7 @@ The overall record structure yielded per image:
 
 The project intends to systematically explore all combinations across the following axes, rather than committing to a single pipeline upfront. The goal is to understand which components drive performance and why.
 
-### 5.1 Classical Models
+### 6.1 Classical Models
 
 | Model | Notes |
 |---|---|
@@ -183,7 +183,7 @@ All classical models require a fixed-length feature vector. Two feature extracti
 
 **Strategy B — Pretrained CNN embeddings:** Pass images through a frozen ResNet-50 (or EfficientNet-B0) and extract the penultimate layer (~2048 dims). Far more semantically rich.
 
-### 5.2 Dimensionality Reduction (for classical models)
+### 6.2 Dimensionality Reduction (for classical models)
 
 Applied after feature extraction, before the classifier. Both options will be tested:
 
@@ -196,7 +196,7 @@ With ~4,500 training samples, JL targets around 200–400 dimensions for reasona
 
 Scikit-learn implementations: `sklearn.decomposition.PCA` and `sklearn.random_projection.SparseRandomProjection`.
 
-### 5.3 Deep Learning Models
+### 6.3 Deep Learning Models
 
 | Model | Strategy |
 |---|---|
@@ -207,7 +207,7 @@ Scikit-learn implementations: `sklearn.decomposition.PCA` and `sklearn.random_pr
 
 Input: 224×224×3 normalised images for all deep models.
 
-### 5.4 Additional Models
+### 6.4 Additional Models
 
 | Model | Rationale |
 |---|---|
