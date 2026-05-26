@@ -51,8 +51,8 @@ The 17 CSV columns fall into four categories. Only the final category produces a
 
 | Column | Role |
 |---|---|
-| `label` | Primary target — "REAL" or "FAKE" |
-| `label_numeric` | Numeric encoding of `label` — dropped as redundant |
+| `label` | Primary target - "REAL" or "FAKE" - dropped as redundant |
+| `label_numeric` | Numeric encoding of `label` - will be used as the actual label |
 
 ### Leakage columns — drop before any training
 
