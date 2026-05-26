@@ -1,10 +1,15 @@
 """
 Extract network flow features and image data from URLs, yielding records for ML.
 
-This script processes image URLs from a dataset, captures associated network
-flows using NFStream, fetches the image, and yields a combined record containing
-the image content, network features, and metadata. This allows for real-time
-preprocessing and model training without saving intermediate files.
+This script processes image URLs from a pre-split dataset (split_dataset.csv),
+captures associated network flows using NFStream, fetches the image, and yields
+a combined record containing the image content, network features, and metadata.
+This allows for real-time preprocessing and model training without saving
+intermediate files.
+
+Pipeline:
+    1. Run create_split.py to generate split_dataset.csv from the raw dataset
+    2. Use get_data_stream(split_target='train'|'val'|'test') to process specific splits
 
 Requirements:
     pip install nfstream requests pandas
@@ -38,17 +43,35 @@ IDLE_TIMEOUT = 10         # Seconds of inactivity before NFStream expires a flow
 REQUEST_TIMEOUT = 30      # Per-image HTTP request timeout in seconds
 # ---------------------------------------------------------------------------
 
-def _get_dataset_urls() -> Tuple[list, list]:
-    """Locate the dataset CSV and extract URLs and labels."""
+def _get_dataset_urls(split_target: str = "train") -> Tuple[list, list]:
+    """
+    Load the pre-split dataset and extract URLs and labels for a specific split.
+    
+    Args:
+        split_target: Which split to load - 'train', 'val', or 'test' (default: 'train')
+        
+    Returns:
+        Tuple of (image_urls, labels) filtered by the specified split
+    """
+    if split_target not in ["train", "val", "test"]:
+        raise ValueError(f"split_target must be 'train', 'val', or 'test', got '{split_target}'")
+    
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    csv_files = glob.glob(os.path.join(script_dir, "**", "*.csv"), recursive=True)
-    if not csv_files:
-        raise FileNotFoundError("No CSV found — run downloaddataset.py first.")
-
-    dataset_df = pd.read_csv(csv_files[0])
-    print(f"Loaded {len(dataset_df)} rows  |  columns: {list(dataset_df.columns)}")
-
-    valid = dataset_df[["image_url", "label_numeric"]].dropna()
+    split_csv_path = os.path.join(script_dir, "datasets", "split_dataset.csv")
+    
+    if not os.path.exists(split_csv_path):
+        raise FileNotFoundError(f"split_dataset.csv not found at {split_csv_path}. Run create_split.py first.")
+    
+    dataset_df = pd.read_csv(split_csv_path)
+    print(f"Loaded split dataset from {split_csv_path}")
+    print(f"Dataset columns: {list(dataset_df.columns)}")
+    
+    # Filter by split_target
+    split_data = dataset_df[dataset_df["data_split"] == split_target]
+    print(f"Filtered {len(split_data)} samples for '{split_target}' split")
+    
+    # Extract URLs and labels
+    valid = split_data[["image_url", "label_numeric"]].dropna()
     return valid["image_url"].tolist(), valid["label_numeric"].tolist()
 
 def _resolve_hostnames(urls: list) -> dict:
@@ -123,19 +146,22 @@ def preprocess_image(image_bytes: bytes) -> Any:
     print("  (Preprocessing image...)")
     return img_array
 
-def get_data_stream() -> Iterator[Dict[str, Any]]:
+def get_data_stream(split_target: str = "train") -> Iterator[Dict[str, Any]]:
     """
-    Main generator function to process URLs and yield data records.
+    Main generator function to process URLs and yield data records from a specific split.
 
     This function orchestrates the process of:
-    1. Loading URLs from the dataset.
+    1. Loading URLs and labels from the split dataset.
     2. Starting network flow capture.
     3. Fetching each image and its metadata.
     4. Preprocessing the image.
     5. Draining and merging captured network flow data.
     6. Yielding a final, combined record for each URL.
+    
+    Args:
+        split_target: Which split to process - 'train', 'val', or 'test' (default: 'train')
     """
-    urls, labels = _get_dataset_urls()
+    urls, labels = _get_dataset_urls(split_target=split_target)
     host_to_ip = _resolve_hostnames(urls)
     
     flow_queue: Queue = Queue()
@@ -205,11 +231,12 @@ def get_data_stream() -> Iterator[Dict[str, Any]]:
         yield record
 
 if __name__ == "__main__":
-    # Example of how to consume the data stream
-    print("Starting feature extraction stream...")
+    # Example of how to consume the data stream with a specific split
+    split_choice = "train"  # Change to "val" or "test" as needed
+    print(f"Starting feature extraction stream for '{split_choice}' split...")
     
     processed_count = 0
-    for data_record in get_data_stream():
+    for data_record in get_data_stream(split_target=split_choice):
         print(f"\n--- Record {processed_count + 1} ---")
         print(f"URL: {data_record['url']}")
         print(f"Label: {data_record['label']}")
