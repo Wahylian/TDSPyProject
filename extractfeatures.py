@@ -24,6 +24,10 @@ from queue import Empty, Queue
 from urllib.parse import urlparse
 from typing import Iterator, Dict, Any, Optional, Tuple
 
+from PIL import Image
+import io
+import numpy as np
+
 import nfstream
 import pandas as pd
 import requests
@@ -44,8 +48,8 @@ def _get_dataset_urls() -> Tuple[list, list]:
     dataset_df = pd.read_csv(csv_files[0])
     print(f"Loaded {len(dataset_df)} rows  |  columns: {list(dataset_df.columns)}")
 
-    valid = dataset_df[["image_url", "label"]].dropna()
-    return valid["image_url"].tolist(), valid["label"].tolist()
+    valid = dataset_df[["image_url", "label_numeric"]].dropna()
+    return valid["image_url"].tolist(), valid["label_numeric"].tolist()
 
 def _resolve_hostnames(urls: list) -> dict:
     """Pre-resolve hostnames to IP addresses for faster matching."""
@@ -95,7 +99,8 @@ def _drain_flow_queue(flow_queue: Queue) -> list:
 
 def preprocess_image(image_bytes: bytes) -> Any:
     """
-    Placeholder for image preprocessing.
+    function for preprocessing of the images
+    rescales images to size 1024x1024
     
     Args:
         image_bytes: The raw byte content of the downloaded image.
@@ -104,14 +109,19 @@ def preprocess_image(image_bytes: bytes) -> Any:
         The processed image data (e.g., a NumPy array, a PyTorch tensor).
         For now, it returns the bytes as is.
     """
-    print("  (Preprocessing image...}")
-    # Example: Convert to a PIL Image, resize, and convert to a NumPy array.
-    # from PIL import Image
-    # import io
-    # import numpy as np
-    # img = Image.open(io.BytesIO(image_bytes)).resize((224, 224))
-    # return np.array(img)
-    return image_bytes
+    
+    
+    img = Image.open(io.BytesIO(image_bytes))
+    
+    # Rescale 1080x1080 to 1024x1024 (without cropping)
+    # Rescales image to 512x512
+    img = img.resize((512, 512), Image.Resampling.LANCZOS)
+    
+    # Convert to numpy array and normalize pixel values to [0, 1]
+    img_array = np.array(img).astype(np.float32) / 255.0
+    
+    print("  (Preprocessing image...)")
+    return img_array
 
 def get_data_stream() -> Iterator[Dict[str, Any]]:
     """
