@@ -21,17 +21,12 @@ To list available interfaces:
     python -c "import nfstream; print(nfstream.NFStreamer.show_interfaces())"
 """
 import os
-import glob
 import socket
 import time
 import threading
 from queue import Empty, Queue
 from urllib.parse import urlparse
 from typing import Iterator, Dict, Any, Optional, Tuple
-
-from PIL import Image
-import io
-import numpy as np
 
 import nfstream
 import pandas as pd
@@ -120,32 +115,6 @@ def _drain_flow_queue(flow_queue: Queue) -> list:
     print(f"Captured {len(raw_flows)} network flows")
     return raw_flows
 
-def preprocess_image(image_bytes: bytes) -> Any:
-    """
-    function for preprocessing of the images
-    rescales images to size 1024x1024
-    
-    Args:
-        image_bytes: The raw byte content of the downloaded image.
-        
-    Returns:
-        The processed image data (e.g., a NumPy array, a PyTorch tensor).
-        For now, it returns the bytes as is.
-    """
-    
-    
-    img = Image.open(io.BytesIO(image_bytes))
-    
-    # Rescale 1080x1080 to 1024x1024 (without cropping)
-    # Rescales image to 512x512
-    img = img.resize((512, 512), Image.Resampling.LANCZOS)
-    
-    # Convert to numpy array and normalize pixel values to [0, 1]
-    img_array = np.array(img).astype(np.float32) / 255.0
-    
-    print("  (Preprocessing image...)")
-    return img_array
-
 def get_data_stream(split_target: str = "train") -> Iterator[Dict[str, Any]]:
     """
     Main generator function to process URLs and yield data records from a specific split.
@@ -195,8 +164,8 @@ def get_data_stream(split_target: str = "train") -> Iterator[Dict[str, Any]]:
             })
 
             if r.ok:
-                # Preprocess the image here before it's used by the model
-                record["image_data"] = preprocess_image(r.content)
+                # Store raw image bytes without preprocessing
+                record["image_data"] = r.content
 
         except Exception as e:
             print(f"  Error fetching {url}: {e}")
