@@ -17,7 +17,7 @@ from typing import Tuple, List
 import sys
 
 # Import pipeline components
-from image_preprocessing import ImagePipeline, batch_process, flatten_image
+from image_preprocessing import ImagePipeline, batch_process, vectorize_image
 
 # Optional: ML library imports (comment out if not installed)
 try:
@@ -57,7 +57,7 @@ class PrebuiltPipelines:
             ('resize', {'target_size': (128, 128), 'preserve_aspect': True}),
             ('denoise', {'method': 'bilateral', 'kernel_size': 5}),
             ('normalize', {'method': 'minmax', 'value_range': (0.0, 1.0)}),
-            ('flatten', {'preserve_structure': False})
+            ('vectorize', {'preserve_structure': False})
         ])
     
     @staticmethod
@@ -71,7 +71,7 @@ class PrebuiltPipelines:
             ('grayscale', {}),
             ('resize', {'target_size': (64, 64), 'preserve_aspect': True}),
             ('normalize', {'method': 'minmax'}),
-            ('flatten', {})
+            ('vectorize', {})
         ])
     
     @staticmethod
@@ -86,7 +86,7 @@ class PrebuiltPipelines:
             ('resize', {'target_size': (224, 224), 'preserve_aspect': True}),
             ('denoise', {'method': 'bilateral', 'kernel_size': 7}),
             ('normalize', {'method': 'standard'}),  # Standard normalization for better SVM
-            ('flatten', {})
+            ('vectorize', {})
         ])
     
     @staticmethod
@@ -96,7 +96,19 @@ class PrebuiltPipelines:
             ('grayscale', {}),
             ('resize', {'target_size': (128, 128), 'preserve_aspect': True}),
             ('normalize', {'method': 'minmax'}),
-            ('flatten', {})
+            ('vectorize', {})
+        ])
+    
+    @staticmethod
+    def fast_embedding_pipeline() -> ImagePipeline:
+        """Fast embedding pipeline: low resolution, using vector embedding for the images.
+        Output: 4,096 features per image (64x64 grayscale)
+        Best for quick experimentation with vector embeddings."""
+        return ImagePipeline([
+            ('grayscale', {}),
+            ('resize', {'target_size': (64, 64), 'preserve_aspect': True}),
+            ('normalize', {'method': 'minmax'}),
+            ('vectorize', {'method': "vgg16"})
         ])
 
 
@@ -275,6 +287,7 @@ def compare_pipelines(
         'Fast (64x64)': PrebuiltPipelines.fast_pipeline(),
         'Balanced (128x128)': PrebuiltPipelines.svm_pipeline(),
         'High-Quality (224x224)': PrebuiltPipelines.hq_pipeline(),
+        'Fast Vector-Embedding (64x64)': PrebuiltPipelines.fast_embedding_pipeline(),
     }
     
     results = {}

@@ -6,7 +6,7 @@ traditional ML models (e.g., SVM, Random Forest). Functions are highly modular,
 composable, and can be chained together in various configurations.
 
 Features:
-    - Flatten images to 1D vectors for ML model input
+    - Image vectorization (flat pixels or VGG16 embeddings)
     - Normalization (pixel value scaling)
     - Image resizing with aspect ratio preservation
     - Grayscale conversion
@@ -19,7 +19,7 @@ Example Usage:
     ...     ('grayscale', {'force': True}),
     ...     ('resize', {'target_size': (64, 64)}),
     ...     ('normalize', {'method': 'minmax'}),
-    ...     ('flatten', {})
+    ...     ('vectorize', {})
     ... ])
     >>> features = pipeline.process(image_array)
 
@@ -28,71 +28,117 @@ Requirements:
     - opencv-python (cv2)
     - scikit-image
     - Pillow
+    - tensorflow (optional, required for VGG16 embeddings)
 """
 
-from typing import Callable, List, Tuple, Dict, Any, Union, Optional
+from typing import Callable, List, Tuple, Dict, Any, Optional
 import numpy as np
 import cv2
 from skimage import exposure
 from PIL import Image as PILImage
+import os
+
+_vgg16_model = {}
 
 
 # ============================================================================
-# CORE FUNCTION: Flatten/Vectorize for ML Models
+# CORE FUNCTION: Vectorize for ML Models
 # ============================================================================
 
-def flatten_image(
+def vectorize_image(
     image_array: np.ndarray,
-    preserve_structure: bool = False
+    method: str = 'flat',
+    preserve_structure: bool = False,
+    input_size: Tuple[int, int] = (224, 224),
 ) -> np.ndarray:
     """
-    Flatten a 2D/3D image array into a 1D feature vector for traditional ML models.
-    
-    Converts images (grayscale or color) into flat vectors suitable for SVM,
-    Random Forest, or other vectorized ML algorithms. Supports optional 
-    preservation of channel structure for multi-channel images.
-    
+    Convert a 2D/3D image array into a 1D feature vector for ML models.
+
     Args:
         image_array: Input image as np.ndarray (2D for grayscale, 3D for color).
                      Expected shape: (height, width) or (height, width, channels).
-        preserve_structure: If True, concatenates channels separately to preserve
-                          spatial channel information. If False, flattens entirely. 
-                          Default: False.
-    
+        method: Vectorization method. Options:
+            - 'flat': Flatten raw pixels into a 1D vector (default)
+            - 'vgg16': Extract features from pre-trained VGG16 (block5_pool layer)
+        preserve_structure: For method='flat', if True, concatenates channels
+                          separately. Default: False.
+        input_size: For method='vgg16', target (height, width). Default: (224, 224).
+
     Returns:
-        Flattened 1D array of dtype float32.
-    
+        1D feature vector of dtype float32.
+
     Raises:
         TypeError: If input is not a numpy array.
-        ValueError: If image has unsupported number of dimensions (not 2D or 3D).
-    
+        ValueError: If image has unsupported dimensions or method is unknown.
+        ImportError: If method='vgg16' and TensorFlow is not installed.
+
     Example:
         >>> image = np.random.randint(0, 256, (224, 224, 3), dtype=np.uint8)
-        >>> vector = flatten_image(image)
-        >>> vector.shape
+        >>> vectorize_image(image, method='flat').shape
         (150528,)
+        >>> vectorize_image(image, method='vgg16').shape
+        (25088,)
     """
     if not isinstance(image_array, np.ndarray):
         raise TypeError(f"Expected np.ndarray, got {type(image_array)}")
-    
+
     if image_array.ndim not in (2, 3):
         raise ValueError(
             f"Image must be 2D (grayscale) or 3D (color). Got shape {image_array.shape}"
         )
-    
-    image_array = image_array.astype(np.float32)
-    
-    if image_array.ndim == 2:
-        # Grayscale: simple flatten
-        return image_array.flatten()
-    else:
-        # Color image with channels
-        if preserve_structure:
-            # Flatten each channel and concatenate
-            return np.concatenate([channel.flatten() for channel in image_array])
-        else:
-            # Flatten entire array
+
+    if method not in ('flat', 'vgg16'):
+        raise ValueError(f"Unsupported method: {method}. Choose from flat, vgg16.")
+
+    if method == 'flat':
+        image_array = image_array.astype(np.float32)
+
+        if image_array.ndim == 2:
             return image_array.flatten()
+
+        if preserve_structure:
+           return np.concatenate([image_array[:, :, c].flatten() for c in range(image_array.shape[2])])
+
+        return image_array.flatten()
+
+    global _vgg16_model
+    if _vgg16_model not in _vgg16_model:
+        try:
+            from keras.applications import VGG16
+        except ImportError as exc:
+            raise ImportError(
+                "VGG16 embeddings require Keras. Install with: pip install keras"
+            ) from exc
+
+        target_h, target_w = input_size
+        _vgg16_model = VGG16(
+            weights='imagenet',
+            include_top=False,
+            input_shape=(target_h, target_w, 3),
+        )
+    
+    _vgg16_model = _vgg16_model[input_size]
+
+    if image_array.ndim == 2:
+        image_array = np.stack([image_array] * 3, axis=-1)
+
+    target_h, target_w = input_size
+    if image_array.shape[:2] != (target_h, target_w):
+        image_array = resize_image(
+            image_array,
+            (target_h, target_w),
+            preserve_aspect=False,
+            interpolation='bilinear',
+        )
+
+    if image_array.dtype != np.uint8:
+        image_array = np.clip(image_array, 0, 255).astype(np.uint8)
+
+    from keras.applications.vgg16 import preprocess_input
+
+    batch = np.expand_dims(preprocess_input(image_array), axis=0)
+    features = _vgg16_model.predict(batch, verbose=0)
+    return features.reshape(-1).astype(np.float32)
 
 
 # ============================================================================
@@ -296,7 +342,7 @@ def to_grayscale(
     
     # Convert 3D color to 2D grayscale using standard weights
     # Using luminance formula: 0.299*R + 0.587*G + 0.114*B
-    grayscale = cv2.cvtColor(image_array, cv2.COLOR_RGB2GRAY)
+    grayscale = cv2.cvtColor(image_array, cv2.COLOR_BGR2GRAY)
     return grayscale.astype(image_array.dtype)
 
 
@@ -343,20 +389,12 @@ def reduce_noise(
         raise ValueError(f"kernel_size must be positive and odd. Got {kernel_size}")
     
     if method == 'bilateral':
-        if image_array.ndim == 2:
-            return cv2.bilateralFilter(
-                image_array.astype(np.uint8),
-                kernel_size,
-                sigma_color,
-                sigma_space
-            )
-        else:
-            return cv2.bilateralFilter(
-                image_array.astype(np.uint8),
-                kernel_size,
-                sigma_color,
-                sigma_space
-            )
+        return cv2.bilateralFilter(
+            image_array.astype(np.uint8),
+            kernel_size,
+            sigma_color,
+            sigma_space
+        )
     
     elif method == 'gaussian':
         return cv2.GaussianBlur(image_array, (kernel_size, kernel_size), 0)
@@ -383,7 +421,7 @@ class ImagePipeline:
     (function_name, kwargs).
     
     Supported operations:
-        - 'flatten': Flatten image to 1D vector (flatten_image)
+        - 'vectorize': Convert image to 1D feature vector (vectorize_image)
         - 'normalize': Normalize pixel values (normalize_image)
         - 'resize': Resize image (resize_image)
         - 'grayscale': Convert to grayscale (to_grayscale)
@@ -394,7 +432,7 @@ class ImagePipeline:
         ...     ('grayscale', {}),
         ...     ('resize', {'target_size': (64, 64)}),
         ...     ('normalize', {'method': 'minmax'}),
-        ...     ('flatten', {})
+        ...     ('vectorize', {})
         ... ])
         >>> image = np.random.randint(0, 256, (224, 224, 3), dtype=np.uint8)
         >>> features = pipeline.process(image)
@@ -402,7 +440,7 @@ class ImagePipeline:
     
     # Map operation names to functions
     OPERATIONS: Dict[str, Callable] = {
-        'flatten': flatten_image,
+        'vectorize': vectorize_image,
         'normalize': normalize_image,
         'resize': resize_image,
         'grayscale': to_grayscale,
@@ -500,8 +538,8 @@ def compose(*functions: Callable) -> Callable:
         >>> from functools import partial
         >>> resize_64 = partial(resize_image, target_size=(64, 64))
         >>> normalize_minmax = partial(normalize_image, method='minmax')
-        >>> flatten = flatten_image
-        >>> pipeline = compose(flatten, normalize_minmax, resize_64)
+        >>> vectorize = vectorize_image
+        >>> pipeline = compose(vectorize, normalize_minmax, resize_64)
         >>> image = np.random.randint(0, 256, (224, 224, 3), dtype=np.uint8)
         >>> features = pipeline(image)
     """
@@ -531,7 +569,7 @@ def pipeline_decorator(*operations: Tuple[Callable, Dict[str, Any]]) -> Callable
         >>> @pipeline_decorator(
         ...     (to_grayscale, {}),
         ...     (lambda x: resize_image(x, (64, 64)), {}),
-        ...     (flatten_image, {})
+        ...     (vectorize_image, {})
         ... )
         >>> def extract_features(image):
         ...     return image  # Already preprocessed
@@ -588,6 +626,8 @@ def load_image_from_file(file_path: str) -> np.ndarray:
         FileNotFoundError: If file doesn't exist.
         ValueError: If file cannot be read as image.
     """
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"Image file not found: {file_path}")
     image = cv2.imread(file_path)
     if image is None:
         raise ValueError(f"Failed to read image: {file_path}")
@@ -652,8 +692,14 @@ if __name__ == "__main__":
     denoised = reduce_noise(sample_image, method='bilateral')
     print(f"   - Denoised: {denoised.shape}")
     
-    flattened = flatten_image(sample_image)
-    print(f"   - Flattened: {flattened.shape}")
+    vectorized = vectorize_image(sample_image, method='flat')
+    print(f"   - Vectorized (flat): {vectorized.shape}")
+
+    try:
+        vgg_features = vectorize_image(sample_image, method='vgg16')
+        print(f"   - Vectorized (vgg16): {vgg_features.shape}")
+    except ImportError as exc:
+        print(f"   - VGG16 skipped: {exc}")
     
     # Pipeline class example
     print("\n3. Pipeline Class Example:")
@@ -662,7 +708,7 @@ if __name__ == "__main__":
         ('resize', {'target_size': (64, 64), 'preserve_aspect': True}),
         ('denoise', {'method': 'bilateral', 'kernel_size': 5}),
         ('normalize', {'method': 'minmax'}),
-        ('flatten', {})
+        ('vectorize', {})
     ])
     print(f"   Pipeline: {pipeline}")
     
@@ -678,9 +724,9 @@ if __name__ == "__main__":
     gray_op = partial(to_grayscale)
     resize_op = partial(resize_image, target_size=(64, 64))
     norm_op = partial(normalize_image, method='minmax')
-    flat_op = flatten_image
-    
-    composed_pipeline = compose(flat_op, norm_op, resize_op, gray_op)
+    vectorize_op = vectorize_image
+
+    composed_pipeline = compose(vectorize_op, norm_op, resize_op, gray_op)
     features_composed = composed_pipeline(sample_image)
     print(f"   Composed pipeline output: {features_composed.shape}")
     

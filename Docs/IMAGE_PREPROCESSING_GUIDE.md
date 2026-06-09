@@ -4,7 +4,7 @@
 
 The `image_preprocessing.py` module provides a production-ready, modular image preprocessing pipeline designed for traditional ML models (SVM, Random Forest, etc.). It features:
 
-✅ **Core flattening function** for converting images to 1D feature vectors  
+✅ **Flexible image vectorization** — flat pixel vectors or VGG16 deep embeddings  
 ✅ **4 powerful preprocessing operations** (normalization, resizing, grayscale, denoising)  
 ✅ **3 composition patterns** for flexible pipeline configuration  
 ✅ **Full type hints and comprehensive docstrings**  
@@ -21,38 +21,68 @@ The `image_preprocessing.py` module provides a production-ready, modular image p
 pip install opencv-python scikit-image numpy pillow
 ```
 
+For VGG16 embeddings, also install TensorFlow:
+
+```bash
+pip install tensorflow
+```
+
 These are typically already in your project environment if you're using computer vision tasks.
 
 ---
 
-## Core Function: `flatten_image()`
+## Core Function: `vectorize_image()`
 
-Converts 2D/3D image arrays into 1D feature vectors optimized for traditional ML models.
+Converts 2D/3D image arrays into 1D feature vectors for ML models.
 
 ### Parameters
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `image_array` | np.ndarray | - | Input image (2D grayscale or 3D color) |
-| `preserve_structure` | bool | False | Preserve channel structure when flattening |
+| `method` | str | `'flat'` | `'flat'` for raw pixels, `'vgg16'` for VGG16 embeddings |
+| `preserve_structure` | bool | False | For `method='flat'`, flatten each channel separately |
+| `input_size` | tuple | `(224, 224)` | For `method='vgg16'`, target (height, width) |
+
+### Methods
+
+| Method | Output Size (224×224 RGB) | Best For |
+|--------|---------------------------|----------|
+| `'flat'` | 150,528 (H×W×C pixels) | SVM, Random Forest, fast baselines |
+| `'vgg16'` | 25,088 (7×7×512 from block5_pool) | Transfer learning, richer semantic features |
 
 ### Examples
 
 ```python
 import numpy as np
-from image_preprocessing import flatten_image
+from image_preprocessing import vectorize_image
 
-# Load/create an image (H, W, C)
 image = np.random.randint(0, 256, (224, 224, 3), dtype=np.uint8)
 
-# Flatten to 1D vector (150,528 features)
-features = flatten_image(image)
+# Flat pixel vectorization (default)
+features = vectorize_image(image)
 print(features.shape)  # (150528,)
 
 # Grayscale image
 gray_image = np.random.randint(0, 256, (224, 224), dtype=np.uint8)
-features_gray = flatten_image(gray_image)
+features_gray = vectorize_image(gray_image, method='flat')
 print(features_gray.shape)  # (50176,)
+
+# VGG16 embedding (requires: pip install tensorflow)
+vgg_features = vectorize_image(image, method='vgg16')
+print(vgg_features.shape)  # (25088,)
+```
+
+For VGG16 pipelines, resize first and skip `normalize_image()` — VGG16 applies its own preprocessing:
+
+```python
+from image_preprocessing import ImagePipeline
+
+vgg_pipeline = ImagePipeline([
+    ('resize', {'target_size': (224, 224), 'preserve_aspect': False}),
+    ('vectorize', {'method': 'vgg16'})
+])
+features = vgg_pipeline.process(image)
 ```
 
 ---
@@ -171,7 +201,7 @@ pipeline = ImagePipeline([
     ('resize', {'target_size': (64, 64), 'preserve_aspect': True}),
     ('denoise', {'method': 'bilateral', 'kernel_size': 5}),
     ('normalize', {'method': 'minmax'}),
-    ('flatten', {})
+    ('vectorize', {})
 ])
 
 # Process images
@@ -199,17 +229,17 @@ print(pipeline)
 Best when: You want explicit function composition without class overhead.
 
 ```python
-from image_preprocessing import compose, flatten_image, normalize_image, resize_image, to_grayscale
+from image_preprocessing import compose, vectorize_image, normalize_image, resize_image, to_grayscale
 from functools import partial
 
 # Define partial functions
 gray = to_grayscale
 resize_64 = partial(resize_image, target_size=(64, 64), preserve_aspect=True)
 normalize = partial(normalize_image, method='minmax')
-flatten = flatten_image
+vectorize = vectorize_image
 
 # Compose functions (applied right-to-left)
-pipeline = compose(flatten, normalize, resize_64, gray)
+pipeline = compose(vectorize, normalize, resize_64, gray)
 
 # Process
 features = pipeline(image)
@@ -229,13 +259,13 @@ print(features.shape)  # (4096,)
 Best when: You want to wrap custom feature extraction functions.
 
 ```python
-from image_preprocessing import pipeline_decorator, to_grayscale, resize_image, flatten_image
+from image_preprocessing import pipeline_decorator, to_grayscale, resize_image, vectorize_image
 from functools import partial
 
 @pipeline_decorator(
     (to_grayscale, {}),
     (lambda x: resize_image(x, (64, 64)), {}),
-    (flatten_image, {})
+    (vectorize_image, {})
 )
 def extract_ml_features(image):
     """Custom feature extraction with automatic preprocessing."""
@@ -268,7 +298,7 @@ ML_PIPELINE = ImagePipeline([
     ('grayscale', {}),
     ('resize', {'target_size': (64, 64)}),
     ('normalize', {'method': 'minmax'}),
-    ('flatten', {})
+    ('vectorize', {})
 ])
 
 def extract_image_features(image_array: np.ndarray) -> np.ndarray:
@@ -301,20 +331,20 @@ model = SVC(kernel='rbf')
 model.fit(features_batch, labels)
 ```
 
-### 3. For SVM Training
+### 3. For SVM Training (Flat Features)
 
 ```python
 from image_preprocessing import ImagePipeline
 from sklearn.svm import SVC
 import numpy as np
 
-# Prepare pipeline optimized for SVM
+# Prepare pipeline optimized for SVM with flat pixel features
 svm_pipeline = ImagePipeline([
     ('grayscale', {}),
     ('resize', {'target_size': (128, 128)}),
     ('denoise', {'method': 'bilateral'}),
     ('normalize', {'method': 'minmax'}),
-    ('flatten', {})
+    ('vectorize', {})
 ])
 
 # Extract features from training set
@@ -328,6 +358,33 @@ svm.fit(train_features, train_labels)
 # Predict on test set
 test_features = np.array([svm_pipeline.process(img) for img in test_images])
 predictions = svm.predict(test_features)
+```
+
+### 4. For SVM Training (VGG16 Embeddings)
+
+```python
+from image_preprocessing import ImagePipeline, batch_process
+from sklearn.svm import SVC
+from sklearn.preprocessing import StandardScaler
+import numpy as np
+
+# VGG16 feature extraction pipeline
+vgg_pipeline = ImagePipeline([
+    ('resize', {'target_size': (224, 224), 'preserve_aspect': False}),
+    ('vectorize', {'method': 'vgg16'})
+])
+
+train_features = batch_process(train_images, vgg_pipeline)
+test_features = batch_process(test_images, vgg_pipeline)
+print(f"Feature matrix shape: {train_features.shape}")  # (n_samples, 25088)
+
+scaler = StandardScaler()
+train_scaled = scaler.fit_transform(train_features)
+test_scaled = scaler.transform(test_features)
+
+svm = SVC(kernel='rbf', C=1.0, gamma='scale')
+svm.fit(train_scaled, train_labels)
+predictions = svm.predict(test_scaled)
 ```
 
 ---
@@ -344,7 +401,7 @@ pipeline_hq = ImagePipeline([
     ('grayscale', {}),
     ('resize', {'target_size': (224, 224)}),
     ('normalize', {'method': 'minmax'}),
-    ('flatten', {})
+    ('vectorize', {})
 ])
 # Output: 224*224 = 50,176 features
 
@@ -353,7 +410,7 @@ pipeline_med = ImagePipeline([
     ('grayscale', {}),
     ('resize', {'target_size': (128, 128)}),
     ('normalize', {'method': 'minmax'}),
-    ('flatten', {})
+    ('vectorize', {})
 ])
 # Output: 128*128 = 16,384 features
 
@@ -362,10 +419,20 @@ pipeline_fast = ImagePipeline([
     ('grayscale', {}),
     ('resize', {'target_size': (64, 64)}),
     ('normalize', {'method': 'minmax'}),
-    ('flatten', {})
+    ('vectorize', {})
 ])
 # Output: 64*64 = 4,096 features
 ```
+
+### Flat vs VGG16 Feature Trade-offs
+
+| Approach | Feature Dim | Speed | Semantic Richness |
+|----------|-------------|-------|-------------------|
+| Flat 64×64 grayscale | 4,096 | Fastest | Low (raw pixels) |
+| Flat 224×224 RGB | 150,528 | Moderate | Low (raw pixels) |
+| VGG16 embedding | 25,088 | Slower (GPU helps) | High (pre-trained CNN) |
+
+VGG16 is preferred when you have limited labeled data and want transferable visual features. Flat vectorization is preferred for fast iteration and when images are already low-dimensional (e.g., 64×64 grayscale).
 
 ### Preprocessing Time Comparison
 
@@ -377,13 +444,13 @@ pipelines = {
     'fast': ImagePipeline([
         ('grayscale', {}),
         ('resize', {'target_size': (64, 64)}),
-        ('flatten', {})
+        ('vectorize', {})
     ]),
     'balanced': ImagePipeline([
         ('grayscale', {}),
         ('resize', {'target_size': (128, 128)}),
         ('normalize', {'method': 'minmax'}),
-        ('flatten', {})
+        ('vectorize', {})
     ])
 }
 
@@ -402,17 +469,17 @@ for name, pipeline in pipelines.items():
 All functions include robust error handling:
 
 ```python
-from image_preprocessing import ImagePipeline, flatten_image
+from image_preprocessing import ImagePipeline, vectorize_image
 
 # Type checking
 try:
-    flatten_image([1, 2, 3])  # Not an array
+    vectorize_image([1, 2, 3])  # Not an array
 except TypeError as e:
     print(f"Error: {e}")
 
 # Dimension checking
 try:
-    flatten_image(np.ones((10, 10, 3, 2)))  # 4D array
+    vectorize_image(np.ones((10, 10, 3, 2)))  # 4D array
 except ValueError as e:
     print(f"Error: {e}")
 
@@ -456,7 +523,7 @@ CustomPipeline.OPERATIONS['edges'] = CustomPipeline.custom_edges
 pipeline = CustomPipeline([
     ('grayscale', {}),
     ('edges', {}),
-    ('flatten', {})
+    ('vectorize', {})
 ])
 ```
 
@@ -484,7 +551,7 @@ This will output shape and value range information for:
 
 | Function | Purpose | Returns |
 |----------|---------|---------|
-| `flatten_image()` | Convert image to 1D vector | np.ndarray (1D) |
+| `vectorize_image()` | Convert image to 1D vector (flat or vgg16) | np.ndarray (1D) |
 | `normalize_image()` | Normalize pixel values | np.ndarray (float32) |
 | `resize_image()` | Resize image | np.ndarray (resized) |
 | `to_grayscale()` | Convert to grayscale | np.ndarray (2D) |
@@ -513,6 +580,6 @@ help(ImagePipeline.process)
 
 ---
 
-**Version:** 1.0  
-**Last Updated:** 2026-05-29  
+**Version:** 1.1  
+**Last Updated:** 2026-06-09  
 **Production Ready:** ✅

@@ -8,7 +8,7 @@ pip install opencv-python scikit-image
 ## Quickstart (3 lines)
 ```python
 from image_preprocessing import ImagePipeline
-pipeline = ImagePipeline([('grayscale', {}), ('resize', {'target_size': (64, 64)}), ('normalize', {'method': 'minmax'}), ('flatten', {})])
+pipeline = ImagePipeline([('grayscale', {}), ('resize', {'target_size': (64, 64)}), ('normalize', {'method': 'minmax'}), ('vectorize', {})])
 features = pipeline.process(image)  # (4096,) float32 vector
 ```
 
@@ -20,7 +20,7 @@ pipeline = ImagePipeline([
     ('grayscale', {}),
     ('resize', {'target_size': (64, 64)}),
     ('normalize', {'method': 'minmax'}),
-    ('flatten', {})
+    ('vectorize', {})
 ])
 features = pipeline.process(image)
 ```
@@ -30,7 +30,7 @@ features = pipeline.process(image)
 from functools import partial
 from image_preprocessing import compose
 pipeline = compose(
-    flatten_image,
+    vectorize_image,
     partial(normalize_image, method='minmax'),
     partial(resize_image, target_size=(64, 64)),
     to_grayscale
@@ -40,12 +40,12 @@ features = pipeline(image)
 
 ### 3. Decorator
 ```python
-from image_preprocessing import pipeline_decorator, to_grayscale, resize_image, flatten_image
+from image_preprocessing import pipeline_decorator, to_grayscale, resize_image, vectorize_image
 
 @pipeline_decorator(
     (to_grayscale, {}),
     (lambda x: resize_image(x, (64, 64)), {}),
-    (flatten_image, {})
+    (vectorize_image, {})
 )
 def extract_features(image):
     return image
@@ -66,7 +66,7 @@ pipeline = ImagePipeline([
     ('resize', {'target_size': (128, 128)}),
     ('denoise', {'method': 'bilateral'}),
     ('normalize', {'method': 'minmax'}),
-    ('flatten', {})
+    ('vectorize', {})
 ])
 
 # Extract and train
@@ -89,9 +89,9 @@ features_batch = batch_process(images_list, pipeline)
 
 ### Multiple Sizes (Experiment)
 ```python
-fast = ImagePipeline([('grayscale', {}), ('resize', {'target_size': (64, 64)}), ('flatten', {})])
-medium = ImagePipeline([('grayscale', {}), ('resize', {'target_size': (128, 128)}), ('flatten', {})])
-hq = ImagePipeline([('grayscale', {}), ('resize', {'target_size': (224, 224)}), ('flatten', {})])
+fast = ImagePipeline([('grayscale', {}), ('resize', {'target_size': (64, 64)}), ('vectorize', {})])
+medium = ImagePipeline([('grayscale', {}), ('resize', {'target_size': (128, 128)}), ('vectorize', {})])
+hq = ImagePipeline([('grayscale', {}), ('resize', {'target_size': (224, 224)}), ('vectorize', {})])
 
 for pipeline, name in [(fast, '64'), (medium, '128'), (hq, '224')]:
     features = batch_process(images, pipeline)
@@ -105,11 +105,15 @@ for pipeline, name in [(fast, '64'), (medium, '128'), (hq, '224')]:
 
 | Function | Default | Output |
 |----------|---------|--------|
-| `flatten_image(img)` | - | 1D array (float32) |
+| `vectorize_image(img)` | - | 1D array (float32) |
 | `normalize_image(img, 'minmax')` | minmax | Normalized [0, 1] |
 | `resize_image(img, (64,64))` | - | Resized array |
 | `to_grayscale(img)` | - | 2D grayscale |
 | `reduce_noise(img, 'bilateral')` | bilateral | Denoised array |
+
+### Vectorization Methods
+- `'flat'`: Raw pixel flatten (default)
+- `'vgg16'`: VGG16 embedding from block5_pool (requires tensorflow)
 
 ### Normalization Methods
 - `'minmax'`: [0, 1] range
@@ -142,11 +146,11 @@ Input Size          Grayscale       RGB
 ### TypeError: Expected np.ndarray
 ```python
 # ❌ Wrong: passing PIL Image
-image_preprocessing.flatten_image(pil_image)
+image_preprocessing.vectorize_image(pil_image)
 
 # ✅ Correct: convert to numpy array
 import numpy as np
-image_preprocessing.flatten_image(np.array(pil_image))
+image_preprocessing.vectorize_image(np.array(pil_image))
 ```
 
 ### ValueError: Image must be 2D or 3D
@@ -174,7 +178,7 @@ ImagePipeline([('normalize', {})])
 fast_pipeline = ImagePipeline([
     ('grayscale', {}),
     ('resize', {'target_size': (64, 64)}),
-    ('flatten', {})
+    ('vectorize', {})
 ])
 # ~100 images/sec
 ```
@@ -186,7 +190,7 @@ accurate_pipeline = ImagePipeline([
     ('resize', {'target_size': (224, 224)}),
     ('denoise', {'method': 'bilateral'}),
     ('normalize', {'method': 'standard'}),
-    ('flatten', {})
+    ('vectorize', {})
 ])
 # ~10-20 images/sec
 ```
@@ -206,7 +210,7 @@ for batch in get_image_batches(size=32):
 pipeline = ImagePipeline([
     ('grayscale', {}),
     ('resize', {'target_size': (64, 64)}),
-    ('flatten', {})
+    ('vectorize', {})
 ])
 
 image = cv2.imread('test.jpg')
@@ -218,8 +222,8 @@ print(f"After grayscale: {gray.shape}")
 resized = resize_image(gray, (64, 64))
 print(f"After resize: {resized.shape}")
 
-flat = flatten_image(resized)
-print(f"After flatten: {flat.shape}, range=[{flat.min()}, {flat.max()}]")
+features = vectorize_image(resized)
+print(f"After vectorize: {features.shape}, range=[{features.min()}, {features.max()}]")
 ```
 
 ### Profile timing
@@ -261,7 +265,7 @@ your_project/
 ```python
 from image_preprocessing import (
     # Core functions
-    flatten_image,
+    vectorize_image,
     normalize_image,
     resize_image,
     to_grayscale,
@@ -303,8 +307,8 @@ no_denoise = PrebuiltPipelines.no_denoise_pipeline()
 
 ```python
 # Function docstring
-from image_preprocessing import flatten_image
-help(flatten_image)
+from image_preprocessing import vectorize_image
+help(vectorize_image)
 
 # Class methods
 from image_preprocessing import ImagePipeline
