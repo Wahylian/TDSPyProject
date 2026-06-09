@@ -38,7 +38,7 @@ from skimage import exposure
 from PIL import Image as PILImage
 import os
 
-_vgg16_model = {}
+_vgg16_models = {}
 
 
 # ============================================================================
@@ -101,8 +101,8 @@ def vectorize_image(
 
         return image_array.flatten()
 
-    global _vgg16_model
-    if _vgg16_model not in _vgg16_model:
+    global _vgg16_models
+    if input_size not in _vgg16_models:
         try:
             from keras.applications import VGG16
         except ImportError as exc:
@@ -111,13 +111,13 @@ def vectorize_image(
             ) from exc
 
         target_h, target_w = input_size
-        _vgg16_model = VGG16(
+        _vgg16_models[input_size] = VGG16(
             weights='imagenet',
             include_top=False,
             input_shape=(target_h, target_w, 3),
         )
     
-    _vgg16_model = _vgg16_model[input_size]
+    model = _vgg16_models[input_size]
 
     if image_array.ndim == 2:
         image_array = np.stack([image_array] * 3, axis=-1)
@@ -137,7 +137,7 @@ def vectorize_image(
     from keras.applications.vgg16 import preprocess_input
 
     batch = np.expand_dims(preprocess_input(image_array), axis=0)
-    features = _vgg16_model.predict(batch, verbose=0)
+    features = model.predict(batch, verbose=0)
     return features.reshape(-1).astype(np.float32)
 
 

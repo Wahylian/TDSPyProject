@@ -324,6 +324,60 @@ def compare_pipelines(
 
 
 # ============================================================================
+# PART 6: vectorize_image Demonstration
+# ============================================================================
+
+def demonstrate_vectorize_image() -> None:
+    """
+    Demonstrate vectorize_image directly, covering all methods and options:
+      - 'flat' on a color image
+      - 'flat' on a grayscale image
+      - 'flat' with preserve_structure=True (channels concatenated separately)
+      - 'vgg16' embedding (skipped gracefully if Keras not installed)
+    """
+    print(f"\n{'='*70}")
+    print("PART 6: vectorize_image Demonstration")
+    print(f"{'='*70}")
+
+    color_image = np.random.randint(0, 256, (224, 224, 3), dtype=np.uint8)
+    gray_image = np.random.randint(0, 256, (224, 224), dtype=np.uint8)
+
+    # --- flat, color ---
+    print("\n[6a] method='flat', color image (224x224x3)")
+    vec = vectorize_image(color_image, method='flat')
+    print(f"  Input shape:  {color_image.shape}")
+    print(f"  Output shape: {vec.shape}  (224*224*3 = {224*224*3})")
+    print(f"  dtype: {vec.dtype}")
+
+    # --- flat, grayscale ---
+    print("\n[6b] method='flat', grayscale image (224x224)")
+    vec_gray = vectorize_image(gray_image, method='flat')
+    print(f"  Input shape:  {gray_image.shape}")
+    print(f"  Output shape: {vec_gray.shape}  (224*224 = {224*224})")
+    print(f"  dtype: {vec_gray.dtype}")
+
+    # --- flat, preserve_structure=True ---
+    print("\n[6c] method='flat', preserve_structure=True (channels concatenated separately)")
+    vec_structured = vectorize_image(color_image, method='flat', preserve_structure=True)
+    print(f"  Input shape:  {color_image.shape}")
+    print(f"  Output shape: {vec_structured.shape}  (same total, channel order preserved)")
+    # Verify the first channel block matches channel 0 flattened
+    expected_ch0 = color_image[:, :, 0].flatten().astype(np.float32)
+    match = np.array_equal(vec_structured[:224*224], expected_ch0)
+    print(f"  First channel block matches channel 0: {match}")
+
+    # --- vgg16 ---
+    print("\n[6d] method='vgg16' (requires Keras/TensorFlow)")
+    try:
+        vec_vgg = vectorize_image(color_image, method='vgg16', input_size=(224, 224))
+        print(f"  Input shape:  {color_image.shape}")
+        print(f"  Output shape: {vec_vgg.shape}")
+        print(f"  dtype: {vec_vgg.dtype}")
+    except ImportError as e:
+        print(f"  Skipped — {e}")
+
+
+# ============================================================================
 # MAIN: Full Workflow Example
 # ============================================================================
 
@@ -381,6 +435,9 @@ def main():
         print("\n[Step 4-5] Skipped (scikit-learn not installed)")
         print("  Install with: pip install scikit-learn")
     
+    # Step 6: vectorize_image demonstration
+    demonstrate_vectorize_image()
+
     print("\n" + "=" * 70)
     print("✓ Integration example completed successfully!")
     print("=" * 70)
