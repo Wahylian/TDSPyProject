@@ -175,12 +175,14 @@ def extract_features_batch(
         Feature matrix of shape (num_images, feature_dim)
     """
     num_images = len(images)
+    # Ceiling division: ensures the last partial batch is still processed
     num_batches = (num_images + batch_size - 1) // batch_size
     
     all_features = []
     
     for batch_idx in range(num_batches):
         start_idx = batch_idx * batch_size
+        # Clamp end_idx so the final batch doesn't overflow the list
         end_idx = min((batch_idx + 1) * batch_size, num_images)
         
         batch_images = images[start_idx:end_idx]
@@ -191,6 +193,7 @@ def extract_features_batch(
             print(f"  Processed batch {batch_idx + 1}/{num_batches} "
                   f"({end_idx}/{num_images} images)")
     
+    # Stack all batch results into a single (num_images, feature_dim) matrix
     features = np.vstack(all_features)
     return features
 
@@ -209,15 +212,17 @@ def train_svm_model(
     
     print(f"\nTraining SVM with {features.shape[0]} samples, {features.shape[1]} features...")
     
-    # Scale features (important for SVM)
+    # SVM is sensitive to feature scale; StandardScaler normalizes to zero mean, unit variance
     scaler = StandardScaler()
     features_scaled = scaler.fit_transform(features)
     
-    # Train SVM
+    # RBF kernel with gamma='scale' (1 / (n_features * X.var())) is a solid default;
+    # C controls the margin softness — higher C = less tolerance for misclassification
     svm = SVC(kernel=kernel, C=C, gamma='scale', verbose=0)
     svm.fit(features_scaled, labels)
     
     print(f"✓ SVM trained. Support vectors: {len(svm.support_vectors_)}")
+    # Return scaler alongside the model so test features can be transformed consistently
     return svm, scaler
 
 
@@ -230,6 +235,8 @@ def train_random_forest(
     
     print(f"\nTraining Random Forest with {features.shape[0]} samples...")
     
+    # random_state=42 ensures reproducible tree splits across runs;
+    # n_jobs=-1 uses all available CPU cores for parallel tree building
     rf = RandomForestClassifier(n_estimators=n_estimators, random_state=42, n_jobs=-1)
     rf.fit(features, labels)
     
@@ -246,11 +253,13 @@ def evaluate_model(
 ) -> dict:
     """Evaluate model and return metrics."""
     
+    # Apply the same scaling used during training (fit only on train set)
     if scaler is not None:
         features_test = scaler.transform(features_test)
     
     predictions = model.predict(features_test)
     
+    # zero_division=0 suppresses warnings when a class has no predicted samples
     metrics = {
         'accuracy': accuracy_score(labels_test, predictions),
         'precision': precision_score(labels_test, predictions, zero_division=0),
@@ -298,7 +307,7 @@ def compare_pipelines(
         print(f"{'='*70}")
         print(str(pipeline))
         
-        # Extract features
+        # Extract features for both splits using the current pipeline
         print(f"\nExtracting training features...")
         features_train = extract_features_batch(images_train, pipeline, verbose=False)
         print(f"Train features shape: {features_train.shape}")
@@ -307,7 +316,7 @@ def compare_pipelines(
         features_test = extract_features_batch(images_test, pipeline, verbose=False)
         print(f"Test features shape: {features_test.shape}")
         
-        # Train and evaluate
+        # Skip training if only one class is present (can't fit a classifier)
         if len(np.unique(labels_train)) > 1:  # Need both classes
             svm, scaler = train_svm_model(features_train, labels_train)
             metrics = evaluate_model(svm, features_test, labels_test, scaler, pipeline_name)

@@ -79,6 +79,7 @@ def vectorize_image(
         >>> vectorize_image(image, method='vgg16').shape
         (25088,)
     """
+    # --- Input validation ---
     if not isinstance(image_array, np.ndarray):
         raise TypeError(f"Expected np.ndarray, got {type(image_array)}")
 
@@ -90,19 +91,30 @@ def vectorize_image(
     if method not in ('flat', 'vgg16'):
         raise ValueError(f"Unsupported method: {method}. Choose from flat, vgg16.")
 
+    # --- Flat pixel vectorization ---
     if method == 'flat':
+        # Cast to float32 so the output dtype is consistent regardless of input dtype
         image_array = image_array.astype(np.float32)
 
+        # Grayscale: single channel, flatten directly
         if image_array.ndim == 2:
             return image_array.flatten()
 
+        # Color with preserve_structure: flatten each channel separately and concatenate.
+        # This keeps all R pixels together, then all G, then all B (rather than interleaved),
+        # which can benefit models sensitive to channel-wise spatial patterns.
         if preserve_structure:
            return np.concatenate([image_array[:, :, c].flatten() for c in range(image_array.shape[2])])
 
+        # Default: flatten the entire array in row-major (C) order, interleaving channels
         return image_array.flatten()
 
+    # --- VGG16 deep feature extraction ---
+    # _vgg16_models is a module-level dict caching one model per input_size.
+    # This avoids reloading the ~500MB ImageNet weights on every call.
     global _vgg16_models
     if input_size not in _vgg16_models:
+        # Lazy import: only require Keras if vgg16 method is actually used
         try:
             from keras.applications import VGG16
         except ImportError as exc:
@@ -111,31 +123,38 @@ def vectorize_image(
             ) from exc
 
         target_h, target_w = input_size
+        # include_top=False removes the final classification layers,
+        # returning the block5_pool feature maps instead (25088-dim for 224x224)
         _vgg16_models[input_size] = VGG16(
             weights='imagenet',
             include_top=False,
             input_shape=(target_h, target_w, 3),
         )
     
+    # Retrieve the cached model for this input size
     model = _vgg16_models[input_size]
 
+    # VGG16 expects 3-channel input; replicate single channel across all 3
     if image_array.ndim == 2:
         image_array = np.stack([image_array] * 3, axis=-1)
 
+    # Resize to the model's expected spatial dimensions if needed
     target_h, target_w = input_size
     if image_array.shape[:2] != (target_h, target_w):
         image_array = resize_image(
             image_array,
             (target_h, target_w),
-            preserve_aspect=False,
+            preserve_aspect=False,  # VGG16 requires exact dimensions
             interpolation='bilinear',
         )
 
+    # preprocess_input expects uint8 in [0, 255]; clip guards against out-of-range floats
     if image_array.dtype != np.uint8:
         image_array = np.clip(image_array, 0, 255).astype(np.uint8)
 
     from keras.applications.vgg16 import preprocess_input
 
+    # Add batch dimension (1, H, W, C), run forward pass, flatten to 1D feature vector
     batch = np.expand_dims(preprocess_input(image_array), axis=0)
     features = model.predict(batch, verbose=0)
     return features.reshape(-1).astype(np.float32)
@@ -179,15 +198,18 @@ def normalize_image(
     if method not in ('minmax', 'standard', 'histogram'):
         raise ValueError(f"Unsupported method: {method}. Choose from minmax, standard, histogram.")
     
+    # Work in float32 throughout to avoid integer overflow/truncation
     image_array = image_array.astype(np.float32)
     
     if method == 'minmax':
         min_val = image_array.min()
         max_val = image_array.max()
         
+        # Guard against flat images (all pixels identical) to avoid division by zero
         if max_val == min_val:
             return np.full_like(image_array, (value_range[0] + value_range[1]) / 2)
         
+        # Scale to [0, 1] first, then stretch to the requested value_range
         normalized = (image_array - min_val) / (max_val - min_val)
         return normalized * (value_range[1] - value_range[0]) + value_range[0]
     
@@ -195,18 +217,21 @@ def normalize_image(
         mean = image_array.mean()
         std = image_array.std()
         
+        # Guard against zero-std images (e.g. solid-colour patches) to avoid division by zero
         if std == 0:
             return np.zeros_like(image_array)
         
+        # z-score: (x - mean) / std  →  zero mean, unit variance
         return (image_array - mean) / std
     
     elif method == 'histogram':
         if image_array.ndim == 3:
             raise ValueError("Histogram equalization requires grayscale image (2D).")
         
-        # Convert to uint8 for histogram equalization
+        # cv2.equalizeHist requires uint8 input
         uint8_image = np.clip(image_array, 0, 255).astype(np.uint8)
         equalized = cv2.equalizeHist(uint8_image)
+        # Rescale back to [0, 1] float32 for consistency with other methods
         return equalized.astype(np.float32) / 255.0
 
 
@@ -248,6 +273,7 @@ def resize_image(
     if len(target_size) != 2 or any(s <= 0 for s in target_size):
         raise ValueError(f"target_size must be (height, width) with positive values. Got {target_size}")
     
+    # Map readable interpolation names to cv2 constants
     interp_map = {
         'nearest': cv2.INTER_NEAREST,
         'bilinear': cv2.INTER_LINEAR,
@@ -261,7 +287,9 @@ def resize_image(
     interp_flag = interp_map[interpolation]
     target_h, target_w = target_size
     
+    # Fast path: stretch directly to exact dimensions, ignoring aspect ratio
     if not preserve_aspect:
+        # Note: cv2.resize takes (width, height), opposite of numpy convention
         return cv2.resize(image_array, (target_w, target_h), interpolation=interp_flag)
     
     # Preserve aspect ratio with padding
@@ -269,23 +297,25 @@ def resize_image(
     aspect_ratio = w / h
     target_aspect = target_w / target_h
     
+    # Determine which dimension is the constraining one
     if aspect_ratio > target_aspect:
-        # Image is wider: fit to width
+        # Image is wider than target: fit width, let height shrink
         new_w = target_w
         new_h = int(target_w / aspect_ratio)
     else:
-        # Image is taller: fit to height
+        # Image is taller than target: fit height, let width shrink
         new_h = target_h
         new_w = int(target_h * aspect_ratio)
     
     resized = cv2.resize(image_array, (new_w, new_h), interpolation=interp_flag)
     
-    # Pad to target size
+    # Compute symmetric padding; _extra handles odd-pixel remainder (goes to bottom/right)
     pad_h = (target_h - new_h) // 2
     pad_w = (target_w - new_w) // 2
     pad_h_extra = target_h - new_h - pad_h
     pad_w_extra = target_w - new_w - pad_w
     
+    # Pad with zeros (black border); channel axis untouched for color images
     if image_array.ndim == 2:
         padded = np.pad(
             resized,
@@ -334,15 +364,18 @@ def to_grayscale(
     if image_array.ndim not in (2, 3):
         raise ValueError(f"Expected 2D or 3D array, got shape {image_array.shape}")
     
+    # Already grayscale (2D)
     if image_array.ndim == 2:
         if force:
-            # Apply additional processing even if already grayscale
+            # force=True on an already-grayscale image is a no-op by design;
+            # returns a same-dtype copy to satisfy pipeline consistency
             return image_array.astype(image_array.dtype)
         return image_array
     
-    # Convert 3D color to 2D grayscale using standard weights
-    # Using luminance formula: 0.299*R + 0.587*G + 0.114*B
+    # Convert 3D color (BGR, as loaded by OpenCV) to 2D grayscale.
+    # cv2.COLOR_BGR2GRAY applies luminance weights: 0.114*B + 0.587*G + 0.299*R
     grayscale = cv2.cvtColor(image_array, cv2.COLOR_BGR2GRAY)
+    # Preserve the original dtype so downstream steps don't see unexpected type changes
     return grayscale.astype(image_array.dtype)
 
 
@@ -389,6 +422,10 @@ def reduce_noise(
         raise ValueError(f"kernel_size must be positive and odd. Got {kernel_size}")
     
     if method == 'bilateral':
+        # Edge-preserving filter: smooths regions while keeping sharp boundaries.
+        # sigma_color controls how different pixel intensities can be blended;
+        # sigma_space controls how far spatially pixels influence each other.
+        # Requires uint8 input.
         return cv2.bilateralFilter(
             image_array.astype(np.uint8),
             kernel_size,
@@ -397,14 +434,20 @@ def reduce_noise(
         )
     
     elif method == 'gaussian':
+        # Simple Gaussian blur — fast but blurs edges along with noise
         return cv2.GaussianBlur(image_array, (kernel_size, kernel_size), 0)
     
     elif method == 'morphological':
+        # Opening (erosion then dilation) removes small bright specks;
+        # closing (dilation then erosion) fills small dark holes.
+        # Together they suppress salt-and-pepper style structural noise.
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
         opened = cv2.morphologyEx(image_array.astype(np.uint8), cv2.MORPH_OPEN, kernel)
         return cv2.morphologyEx(opened, cv2.MORPH_CLOSE, kernel)
     
     elif method == 'median':
+        # Replaces each pixel with the median of its neighbourhood —
+        # very effective against salt-and-pepper noise while preserving edges
         return cv2.medianBlur(image_array.astype(np.uint8), kernel_size)
 
 
@@ -487,6 +530,8 @@ class ImagePipeline:
                 operation = self.OPERATIONS[op_name]
                 result = operation(result, **kwargs)
             except Exception as e:
+                # Wrap the original error with pipeline context so it's clear
+                # which step failed and with what parameters
                 raise RuntimeError(
                     f"Pipeline failed at operation '{op_name}' with kwargs {kwargs}. "
                     f"Error: {str(e)}"
@@ -545,6 +590,7 @@ def compose(*functions: Callable) -> Callable:
     """
     def composed(arg: Any) -> Any:
         result = arg
+        # reversed() because compose() is right-to-left: compose(f, g, h)(x) = f(g(h(x)))
         for func in reversed(functions):
             result = func(result)
         return result
