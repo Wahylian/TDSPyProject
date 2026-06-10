@@ -1,212 +1,175 @@
 """
-Modular, Composable Image Preprocessing Pipeline (backward-compatible facade).
+image_preprocessing.py — Unified public API (Facade) for the preprocessing package.
+====================================================================================
 
-This module used to contain the entire preprocessing implementation in one
-file. As of the 2026-06 refactor, the implementation has been split into the
-``preprocessing/`` package for readability and maintainability:
+This module is the **single front door** to every image-preprocessing capability
+in the project. Application code should import *only* from here::
 
-    preprocessing/
-        transforms.py  — to_grayscale, resize_image, normalize_image, reduce_noise
-        vectorize.py   — vectorize_image (flat + VGG16)
-        reduce.py      — reduce_dimensions (None / PCA / Johnson-Lindenstrauss)
-        pipeline.py    — ImagePipeline, batch_process, compose, pipeline_decorator
-        io.py          — load_image_from_{bytes,file,pil}
+    from image_preprocessing import ImagePipeline, batch_process, vectorize_image
 
-This file is preserved as a thin re-export layer so that every previous
-import such as::
+and never reach into the ``preprocessing/`` package directly. That indirection is
+the whole point of the Facade design pattern applied here: the heavy lifting is
+split across several focused submodules for maintainability, while this file
+presents one small, stable, well-documented surface to the rest of the codebase.
 
-    from image_preprocessing import ImagePipeline, vectorize_image, batch_process
+--------------------------------------------------------------------------------
+Why a Facade?
+--------------------------------------------------------------------------------
+The implementation lives in the ``preprocessing/`` package, deliberately broken
+into cohesive submodules. This file re-exports their public symbols so that:
 
-continues to work unchanged.
+  * downstream code has **one import path** to remember (`image_preprocessing`);
+  * the internal package layout can be reorganized freely (split a module, rename
+    a file, move a function) **without breaking a single caller**, as long as this
+    facade keeps re-exporting the same names;
+  * the public API is made **explicit and discoverable** via ``__all__`` below —
+    anything not listed there is an internal detail and may change without notice.
 
-New in 2026-06: an optional dimensionality-reduction step is appended to the
-pipeline after vectorization. See :func:`reduce_dimensions` and the new
-``'reduce'`` pipeline op for usage. With ``method=None`` (the default) the
-step is a pure no-op, so existing pipelines produce bit-identical output.
+--------------------------------------------------------------------------------
+Routing map — where each exported symbol actually lives
+--------------------------------------------------------------------------------
+The facade imports directly from the internal submodules (not through the
+package ``__init__``), so the routing is explicit and there is exactly one hop
+from this file to the real implementation:
 
-Example Usage:
-    >>> from image_preprocessing import ImagePipeline
-    >>> pipeline = ImagePipeline([
-    ...     ('grayscale', {'force': True}),
-    ...     ('resize', {'target_size': (64, 64)}),
-    ...     ('normalize', {'method': 'minmax'}),
-    ...     ('vectorize', {}),
-    ...     ('reduce', {'method': 'pca', 'n_components': 64}),  # new (optional)
-    ... ])
-    >>> features = pipeline.process(image_array)             # per-image
-    >>> X = batch_process([image_array] * 200, pipeline)     # applies PCA on the batch
+    Symbol                     Submodule                     Responsibility
+    -------------------------  ----------------------------  --------------------------------
+    to_grayscale               preprocessing/transforms.py   Per-image: color -> grayscale
+    resize_image               preprocessing/transforms.py   Per-image: resize (+aspect/pad)
+    normalize_image            preprocessing/transforms.py   Per-image: pixel-value scaling
+    reduce_noise               preprocessing/transforms.py   Per-image: denoising filters
+    vectorize_image            preprocessing/vectorize.py    Per-image: image -> 1D vector
+    reduce_dimensions          preprocessing/reduce.py       Batch-level: PCA / JL / bypass
+    ImagePipeline              preprocessing/pipeline.py     Config-driven op chain
+    batch_process              preprocessing/pipeline.py     Run a pipeline over many images
+    compose                    preprocessing/pipeline.py     Right-to-left functional compose
+    pipeline_decorator         preprocessing/pipeline.py     Decorator-style preprocessing
+    BATCH_LEVEL_OPS            preprocessing/pipeline.py     Set of ops that run on a batch
+    load_image_from_bytes      preprocessing/io.py           I/O: raw bytes  -> ndarray (RGB)
+    load_image_from_file       preprocessing/io.py           I/O: file path  -> ndarray (BGR)
+    load_image_from_pil        preprocessing/io.py           I/O: PIL.Image  -> ndarray
 
-Requirements:
+--------------------------------------------------------------------------------
+How to use this API
+--------------------------------------------------------------------------------
+1. Load an image into a NumPy array::
+
+       from image_preprocessing import load_image_from_file
+       img = load_image_from_file("cat.jpg")            # BGR, as OpenCV loads it
+
+2. Build a declarative pipeline and run it on one image::
+
+       from image_preprocessing import ImagePipeline
+       pipeline = ImagePipeline([
+           ('grayscale', {'force': True}),
+           ('resize',    {'target_size': (64, 64)}),
+           ('normalize', {'method': 'minmax'}),
+           ('vectorize', {}),
+           ('reduce',    {'method': 'pca', 'n_components': 64}),  # optional
+       ])
+       features = pipeline.process(img)                  # per-image steps only
+
+3. Run the same pipeline across a batch — this is the only context in which the
+   batch-level ``'reduce'`` step (PCA / Johnson–Lindenstrauss) is actually fit::
+
+       from image_preprocessing import batch_process
+       X = batch_process([img] * 200, pipeline)          # (200, n_components)
+
+Per-image vs batch-level routing (important):
+    Every transform except ``'reduce'`` operates on a single image. ``'reduce'``
+    needs a whole feature matrix to fit, so:
+      * ``pipeline.process(image)`` treats ``('reduce', {'method': None})`` as a
+        no-op and raises a helpful ``ValueError`` for PCA/JL on a lone image.
+      * ``batch_process(images, pipeline)`` splits the chain, runs per-image ops
+        on each image, stacks the vectors, then fits the reducer once over the
+        full batch. Use this whenever a ``'reduce'`` step is present.
+
+--------------------------------------------------------------------------------
+Requirements
+--------------------------------------------------------------------------------
     - numpy
     - opencv-python (cv2)
     - scikit-image
     - Pillow
-    - tensorflow / keras (optional, required for VGG16 embeddings)
-    - scikit-learn (optional, required for PCA / Johnson-Lindenstrauss reduction)
+    - tensorflow / keras   (optional; only for method='vgg16' embeddings)
+    - scikit-learn         (optional; only for PCA / Johnson–Lindenstrauss reduction)
+
+Backward compatibility:
+    The facade name and every exported symbol are unchanged from before the
+    package split, so existing imports such as
+    ``from image_preprocessing import ImagePipeline, vectorize_image, batch_process``
+    continue to work verbatim.
 """
 
-# Re-export the entire public API from the preprocessing package.
-from preprocessing import (
+# =============================================================================
+# Public API imports — routed directly to the internal submodules.
+#
+# Grouping the imports by source submodule keeps the routing obvious: each block
+# below maps one-to-one to a file in the ``preprocessing/`` package. To add a new
+# public symbol, import it in the matching block and list it in ``__all__``.
+# =============================================================================
+
+# --- Per-image transforms ......................... preprocessing/transforms.py
+from preprocessing.transforms import (
+    normalize_image,
+    reduce_noise,
+    resize_image,
+    to_grayscale,
+)
+
+# --- Vectorization (image -> 1D feature vector) ... preprocessing/vectorize.py
+from preprocessing.vectorize import vectorize_image
+
+# --- Batch-level dimensionality reduction ......... preprocessing/reduce.py
+from preprocessing.reduce import reduce_dimensions
+
+# --- Pipeline composition & batching .............. preprocessing/pipeline.py
+from preprocessing.pipeline import (
     BATCH_LEVEL_OPS,
     ImagePipeline,
     batch_process,
     compose,
+    pipeline_decorator,
+)
+
+# --- Image I/O helpers ............................ preprocessing/io.py
+from preprocessing.io import (
     load_image_from_bytes,
     load_image_from_file,
     load_image_from_pil,
-    normalize_image,
-    pipeline_decorator,
-    reduce_dimensions,
-    reduce_noise,
-    resize_image,
-    to_grayscale,
-    vectorize_image,
 )
 
-# The legacy module exposed _vgg16_models as a module-level cache. Some users
-# may import it directly; preserve the alias for backward compatibility.
+# Legacy alias: the pre-split single-file module exposed ``_vgg16_models`` as a
+# module-level VGG16 weight cache. It is a private implementation detail (note the
+# leading underscore) and is intentionally NOT part of ``__all__``, but the alias
+# is preserved so any code that imported it directly keeps working.
 from preprocessing.vectorize import _vgg16_models  # noqa: F401
 
+# =============================================================================
+# Explicit public API.
+#
+# ``__all__`` defines exactly what ``from image_preprocessing import *`` exposes
+# and documents the supported surface. Symbols not listed here (e.g. the
+# ``_vgg16_models`` cache) are internal and may change without notice.
+# =============================================================================
 __all__ = [
-    'BATCH_LEVEL_OPS',
+    # transforms (per-image)
+    'to_grayscale',
+    'resize_image',
+    'normalize_image',
+    'reduce_noise',
+    # vectorize (per-image)
+    'vectorize_image',
+    # reduce (batch-level)
+    'reduce_dimensions',
+    # pipeline / composition
     'ImagePipeline',
     'batch_process',
     'compose',
+    'pipeline_decorator',
+    'BATCH_LEVEL_OPS',
+    # io
     'load_image_from_bytes',
     'load_image_from_file',
     'load_image_from_pil',
-    'normalize_image',
-    'pipeline_decorator',
-    'reduce_dimensions',
-    'reduce_noise',
-    'resize_image',
-    'to_grayscale',
-    'vectorize_image',
 ]
-
-
-if __name__ == "__main__":
-    # Example usage demonstrating all functions (kept identical to the
-    # pre-refactor demo so anyone using `python image_preprocessing.py` for
-    # smoke testing sees the same output shape & flow).
-    import numpy as np
-    from functools import partial
-
-    print("=" * 70)
-    print("Image Preprocessing Pipeline - Example Usage")
-    print("=" * 70)
-
-    # Create sample image
-    sample_image = np.random.randint(0, 256, (224, 224, 3), dtype=np.uint8)
-    print(f"\n1. Original image shape: {sample_image.shape}")
-
-    # Individual function examples
-    print("\n2. Individual Function Examples:")
-
-    gray = to_grayscale(sample_image)
-    print(f"   - Grayscale: {gray.shape}")
-
-    resized = resize_image(sample_image, (64, 64), preserve_aspect=True)
-    print(f"   - Resized: {resized.shape}")
-
-    normalized = normalize_image(sample_image, method='minmax')
-    print(f"   - Normalized range: [{normalized.min():.3f}, {normalized.max():.3f}]")
-
-    denoised = reduce_noise(sample_image, method='bilateral')
-    print(f"   - Denoised: {denoised.shape}")
-
-    vectorized = vectorize_image(sample_image, method='flat')
-    print(f"   - Vectorized (flat): {vectorized.shape}")
-
-    try:
-        vgg_features = vectorize_image(sample_image, method='vgg16')
-        print(f"   - Vectorized (vgg16): {vgg_features.shape}")
-    except ImportError as exc:
-        print(f"   - VGG16 skipped: {exc}")
-
-    # Pipeline class example
-    print("\n3. Pipeline Class Example:")
-    pipeline = ImagePipeline([
-        ('grayscale', {}),
-        ('resize', {'target_size': (64, 64), 'preserve_aspect': True}),
-        ('denoise', {'method': 'bilateral', 'kernel_size': 5}),
-        ('normalize', {'method': 'minmax'}),
-        ('vectorize', {})
-    ])
-    print(f"   Pipeline: {pipeline}")
-
-    features = pipeline.process(sample_image)
-    print(f"   Output shape: {features.shape}")
-    print(f"   Output dtype: {features.dtype}")
-    print(f"   Value range: [{features.min():.3f}, {features.max():.3f}]")
-
-    # Functional composition example
-    print("\n4. Functional Composition Example:")
-
-    gray_op = partial(to_grayscale)
-    resize_op = partial(resize_image, target_size=(64, 64))
-    norm_op = partial(normalize_image, method='minmax')
-    vectorize_op = vectorize_image
-
-    composed_pipeline = compose(vectorize_op, norm_op, resize_op, gray_op)
-    features_composed = composed_pipeline(sample_image)
-    print(f"   Composed pipeline output: {features_composed.shape}")
-
-    # Batch processing example
-    print("\n5. Batch Processing Example:")
-    batch_images = [
-        np.random.randint(0, 256, (224, 224, 3), dtype=np.uint8) for _ in range(4)
-    ]
-    batch_output = batch_process(batch_images, pipeline)
-    print(f"   Batch input: {len(batch_images)} images of shape {batch_images[0].shape}")
-    print(f"   Batch output shape: {batch_output.shape}")
-
-    # NEW: dimensionality-reduction demo
-    print("\n6. NEW: Dimensionality Reduction Demo:")
-    big_batch = [
-        np.random.randint(0, 256, (224, 224, 3), dtype=np.uint8) for _ in range(80)
-    ]
-
-    # 6a. None — bypass (backward-compatible default)
-    bypass_pipeline = ImagePipeline([
-        ('grayscale', {}),
-        ('resize', {'target_size': (64, 64)}),
-        ('normalize', {'method': 'minmax'}),
-        ('vectorize', {}),
-        ('reduce', {'method': None}),
-    ])
-    X_bypass = batch_process(big_batch, bypass_pipeline)
-    print(f"   - method=None    shape: {X_bypass.shape}")
-
-    # 6b. PCA — variance-preserving linear projection
-    try:
-        pca_pipeline = ImagePipeline([
-            ('grayscale', {}),
-            ('resize', {'target_size': (64, 64)}),
-            ('normalize', {'method': 'minmax'}),
-            ('vectorize', {}),
-            ('reduce', {'method': 'pca', 'n_components': 32, 'random_state': 42}),
-        ])
-        X_pca = batch_process(big_batch, pca_pipeline)
-        print(f"   - method=pca     shape: {X_pca.shape}")
-    except ImportError as exc:
-        print(f"   - PCA skipped: {exc}")
-
-    # 6c. Johnson–Lindenstrauss — data-independent random projection
-    try:
-        jl_pipeline = ImagePipeline([
-            ('grayscale', {}),
-            ('resize', {'target_size': (64, 64)}),
-            ('normalize', {'method': 'minmax'}),
-            ('vectorize', {}),
-            ('reduce', {'method': 'johnson_lindenstrauss',
-                        'n_components': 64, 'random_state': 42}),
-        ])
-        X_jl = batch_process(big_batch, jl_pipeline)
-        print(f"   - method=JL      shape: {X_jl.shape}")
-    except ImportError as exc:
-        print(f"   - JL skipped: {exc}")
-
-    print("\n" + "=" * 70)
-    print("Example completed successfully!")
-    print("=" * 70)

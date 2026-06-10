@@ -162,7 +162,11 @@ def resize_image(
 
     resized = cv2.resize(image_array, (new_w, new_h), interpolation=interp_flag)
 
-    # Compute symmetric padding; _extra handles odd-pixel remainder (goes to bottom/right)
+    # Compute symmetric padding so the resized image is centred in target_size.
+    # `pad_*` is the "before" (top/left) amount; `pad_*_extra` is the "after"
+    # (bottom/right) amount and already equals target - new - pad_*, so it
+    # absorbs any odd-pixel remainder. The two must sum to (target - new) — do
+    # NOT add pad_* into the "after" slot or the image overshoots target_size.
     pad_h = (target_h - new_h) // 2
     pad_w = (target_w - new_w) // 2
     pad_h_extra = target_h - new_h - pad_h
@@ -172,14 +176,14 @@ def resize_image(
     if image_array.ndim == 2:
         padded = np.pad(
             resized,
-            ((pad_h, pad_h + pad_h_extra), (pad_w, pad_w + pad_w_extra)),
+            ((pad_h, pad_h_extra), (pad_w, pad_w_extra)),
             mode='constant',
             constant_values=0
         )
     else:
         padded = np.pad(
             resized,
-            ((pad_h, pad_h + pad_h_extra), (pad_w, pad_w + pad_w_extra), (0, 0)),
+            ((pad_h, pad_h_extra), (pad_w, pad_w_extra), (0, 0)),
             mode='constant',
             constant_values=0
         )
