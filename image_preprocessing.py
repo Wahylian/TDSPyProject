@@ -645,7 +645,7 @@ def load_image_from_bytes(image_bytes: bytes) -> np.ndarray:
         image_bytes: Raw byte content of image file.
     
     Returns:
-        Image as np.ndarray (RGB format).
+        Image as np.ndarray (BGR format, matching OpenCV convention).
     
     Raises:
         ValueError: If bytes cannot be read as image.
@@ -653,7 +653,10 @@ def load_image_from_bytes(image_bytes: bytes) -> np.ndarray:
     import io
     try:
         pil_image = PILImage.open(io.BytesIO(image_bytes))
-        return np.array(pil_image)
+        if pil_image.mode != "RGB":
+            pil_image = pil_image.convert("RGB")
+        rgb = np.array(pil_image, dtype=np.uint8)
+        return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
     except Exception as e:
         raise ValueError(f"Failed to load image from bytes: {str(e)}")
 
@@ -688,9 +691,12 @@ def load_image_from_pil(pil_image: PILImage.Image) -> np.ndarray:
         pil_image: PIL Image object.
     
     Returns:
-        Image as np.ndarray.
+        Image as np.ndarray (BGR format, matching OpenCV convention).
     """
-    return np.array(pil_image)
+    if pil_image.mode != "RGB":
+        pil_image = pil_image.convert("RGB")
+    rgb = np.array(pil_image, dtype=np.uint8)
+    return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
 
 
 def batch_process(
