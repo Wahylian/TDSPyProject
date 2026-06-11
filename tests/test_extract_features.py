@@ -94,17 +94,48 @@ def _write_split_csv(path, rows, header=("image_url", "data_split")):
 # ===========================================================================
 
 class TestSplitValidationAndConstants:
+    """Guard the split allow-list and the module's public constants.
+
+    ``_validate_split`` is the gatekeeper every public entry point relies on,
+    so these tests pin down exactly which split names are accepted and confirm
+    the constants other modules import have not drifted from their contract.
+    """
+
     @pytest.mark.parametrize("split", sorted(VALID_SPLITS))
     def test_accepts_valid_splits(self, split):
-        # Should not raise.
+        """Every canonical split name validates without raising.
+
+        Args:
+            split: One of the canonical split names, supplied by the
+                parametrize sweep over ``VALID_SPLITS``.
+        """
+        # Act + Assert: a recognised split must pass silently (no return value,
+        # no exception). The call itself is the assertion.
         _validate_split(split)
 
     @pytest.mark.parametrize("bad", ["", "training", "TRAIN", "dev", "all"])
     def test_rejects_invalid_splits(self, bad):
+        """Unknown / mis-cased / empty split names are rejected.
+
+        The cases deliberately cover the most likely caller mistakes: an empty
+        string, a verbose synonym ("training"), wrong casing ("TRAIN"), an
+        unsupported split ("dev"), and the tempting-but-invalid wildcard "all".
+
+        Args:
+            bad: An invalid split label supplied by the parametrize sweep.
+        """
+        # Act + Assert: validation must fail loudly rather than silently
+        # accepting an unsupported split and corrupting downstream filtering.
         with pytest.raises(ValueError):
             _validate_split(bad)
 
     def test_module_constants_match_spec(self):
+        """The exported constants match their documented contract.
+
+        Other modules import these values directly, so a change here is a
+        breaking API change — this test makes such a change fail fast.
+        """
+        # Assert: the request timeout and the frozen split set are unchanged.
         assert REQUEST_TIMEOUT == 10
         assert VALID_SPLITS == frozenset({"train", "test", "val"})
 
@@ -114,7 +145,20 @@ class TestSplitValidationAndConstants:
 # ===========================================================================
 
 class TestMetadataLoading:
+    """Resolve image-URL lists from on-disk metadata.
+
+    These tests use ``tmp_path`` to fabricate the two supported metadata
+    layouts — a combined ``split_dataset.csv`` and per-split JSON files — so
+    the loader is exercised against real files without shipping a dataset.
+    """
+
     def test_loads_urls_from_combined_split_csv(self, tmp_path):
+        """A combined CSV is read and filtered down to the requested split.
+
+        Validates that the loader keys off the ``data_split`` column rather
+        than returning every row, so callers asking for "train" never leak
+        "test" URLs into their stream.
+        """
         # Arrange: a combined split_dataset.csv with rows for two splits.
         csv_path = tmp_path / "split_dataset.csv"
         _write_split_csv(
@@ -125,7 +169,7 @@ class TestMetadataLoading:
                 ("http://example.com/c.jpg", "test"),
             ],
         )
-        # Act
+        # Act: load each split independently from the same combined file.
         train_urls = _load_image_urls("train", str(tmp_path))
         test_urls = _load_image_urls("test", str(tmp_path))
         # Assert: split filtering keeps only the matching rows.
@@ -133,21 +177,43 @@ class TestMetadataLoading:
         assert test_urls == ["http://example.com/c.jpg"]
 
     def test_loads_urls_from_per_split_json(self, tmp_path):
-        # Per-split file ({split}.json) takes precedence and needs no filtering.
+        """A per-split ``{split}.json`` file is loaded verbatim.
+
+        When a dedicated per-split file exists it already contains only that
+        split's URLs, so the loader must take it as-is and skip the CSV
+        split-filtering path entirely.
+        """
+        # Arrange: a train.json holding exactly the train URLs (no filtering needed).
         (tmp_path / "train.json").write_text(
             '["http://x/1.png", "http://x/2.png"]', encoding="utf-8"
         )
+        # Act
         urls = _load_image_urls("train", str(tmp_path))
+        # Assert: the list is returned unchanged and in order.
         assert urls == ["http://x/1.png", "http://x/2.png"]
 
     def test_url_column_detection(self):
+        """The URL column is auto-detected from a header row.
+
+        The loader supports datasets that name the column either "image_url"
+        or "url"; this pins down the detection priority for both spellings.
+        """
+        # Act + Assert: each known column name is recognised regardless of the
+        # other (non-URL) columns present.
         assert _url_column(["id", "image_url"]) == "image_url"
         assert _url_column(["url", "label"]) == "url"
 
     def test_missing_url_column_raises(self, tmp_path):
-        # Edge case: a CSV without any recognised URL column is unusable.
+        """A CSV with no recognisable URL column fails loudly.
+
+        Edge case: without a URL column there is nothing to stream, so the
+        loader must raise rather than silently yield an empty result that
+        would look like "no images for this split".
+        """
+        # Arrange: a CSV whose headers ("foo", "bar") match no known URL column.
         bad = tmp_path / "split.csv"
         bad.write_text("foo,bar\n1,2\n", encoding="utf-8")
+        # Act + Assert
         with pytest.raises(ValueError):
             _urls_from_csv(str(bad), "train", filter_by_split=False)
 
@@ -157,13 +223,31 @@ class TestMetadataLoading:
 # ===========================================================================
 
 class TestErrorHandling:
+    """Filesystem-level failure modes of metadata loading.
+
+    Distinguishes the two distinct "no data" situations a caller can hit —
+    a base directory that does not exist versus one that exists but is empty
+    — both of which must surface as ``FileNotFoundError``.
+    """
+
     def test_missing_base_dir_raises(self):
-        # Edge case: a base_dir that doesn't exist at all.
+        """A non-existent base directory raises ``FileNotFoundError``.
+
+        Edge case: a base_dir that doesn't exist at all (e.g. a typo'd path)
+        must fail immediately instead of being treated as "empty dataset".
+        """
+        # Act + Assert
         with pytest.raises(FileNotFoundError):
             _load_image_urls("train", "./nonexistent_directory_xyz")
 
     def test_empty_dir_raises_filenotfound(self, tmp_path):
-        # Edge case: directory exists but contains no metadata file.
+        """An existing-but-empty directory still raises ``FileNotFoundError``.
+
+        Edge case: the directory is present but holds no metadata file, so
+        there is no CSV/JSON to read. ``tmp_path`` provides exactly such an
+        empty, real directory.
+        """
+        # Act + Assert
         with pytest.raises(FileNotFoundError):
             _load_image_urls("train", str(tmp_path))
 
@@ -173,7 +257,21 @@ class TestErrorHandling:
 # ===========================================================================
 
 class TestDownloadImage:
+    """The single-image download/decode path, with the network mocked.
+
+    ``requests.get`` is replaced (via the ``mock_download_ok`` fixture or an
+    inline ``monkeypatch``) so these tests never touch the network. They cover
+    the happy path plus the two failure modes a real downloader must tolerate:
+    an HTTP error status and a 200 response carrying undecodable bytes.
+    """
+
     def test_successful_download_returns_bgr_array(self, mock_download_ok):
+        """A valid PNG download decodes to a uint8 BGR array of the right size.
+
+        Args:
+            mock_download_ok: Fixture that stubs ``requests.get`` to return a
+                fixed valid PNG payload, so no real request is made.
+        """
         # Act
         img = _download_image("http://example.com/whatever.png")
         # Assert: decoded to a 3-channel uint8 BGR array of the fake's size.
@@ -183,21 +281,35 @@ class TestDownloadImage:
         assert img.shape[:2] == (8, 12)  # (height, width) of _png_bytes default
 
     def test_http_error_returns_none(self, monkeypatch):
-        # Edge case: a 4xx/5xx response is swallowed and yields None (skipped).
+        """An HTTP error status yields ``None`` after a warning, not a crash.
+
+        Edge case: a 4xx/5xx response must be swallowed so one dead URL does
+        not abort the whole stream — the image is skipped (None) and the
+        caller is told via a ``UserWarning``.
+        """
+        # Arrange: stub requests.get with a response whose raise_for_status fails.
         def fake_get(url, timeout=None):
             return _FakeResponse(b"", status_ok=False)
 
         monkeypatch.setattr(ef.requests, "get", fake_get)
-        # The source warns before swallowing the error; assert both.
+        # Act + Assert: the source warns before swallowing the error; assert both
+        # the warning is emitted and None is returned.
         with pytest.warns(UserWarning):
             assert _download_image("http://example.com/404.png") is None
 
     def test_broken_content_returns_none(self, monkeypatch):
-        # Edge case: a 200 response whose body is not a decodable image.
+        """A 200 response with undecodable bytes yields ``None`` with a warning.
+
+        Edge case: the request "succeeds" (status OK) but the body is not a
+        valid image. Decoding must fail gracefully — warn and skip — rather
+        than propagating an OpenCV/PIL exception up the stream.
+        """
+        # Arrange: stub requests.get to return non-image bytes with an OK status.
         def fake_get(url, timeout=None):
             return _FakeResponse(b"not-an-image", status_ok=True)
 
         monkeypatch.setattr(ef.requests, "get", fake_get)
+        # Act + Assert
         with pytest.warns(UserWarning):
             assert _download_image("http://example.com/garbage") is None
 
@@ -207,8 +319,27 @@ class TestDownloadImage:
 # ===========================================================================
 
 class TestGeneratorContract:
+    """The end-to-end ``get_feature_stream`` generator behaviour.
+
+    Verifies the public streaming entry point both yields well-formed decoded
+    images and honours its resilience contract — that undecodable URLs are
+    skipped rather than aborting iteration. All downloads are mocked.
+    """
+
     @pytest.fixture
     def streamed_images(self, tmp_path, mock_download_ok):
+        """Materialise the full stream for a 3-URL, all-mocked train split.
+
+        Arranges a combined CSV with three train URLs and eagerly drains the
+        generator into a list so individual tests can assert on the results.
+
+        Args:
+            tmp_path: Pytest temp directory holding the fabricated CSV.
+            mock_download_ok: Stubs every download to return a valid PNG.
+
+        Returns:
+            list[np.ndarray]: The decoded images produced by the stream.
+        """
         # Arrange a 3-URL train split; every download is mocked to succeed.
         _write_split_csv(
             tmp_path / "split_dataset.csv",
@@ -217,6 +348,13 @@ class TestGeneratorContract:
         return list(get_feature_stream("train", base_dir=str(tmp_path)))
 
     def test_yields_decoded_bgr_images(self, streamed_images):
+        """The stream yields one well-formed BGR image per (good) URL.
+
+        Args:
+            streamed_images: Pre-drained list of images from the fixture.
+        """
+        # Assert: count matches the input URLs and every item is a valid
+        # 3-channel uint8 image with in-range pixel values.
         assert len(streamed_images) == 3
         for img in streamed_images:
             assert img.dtype == np.uint8
@@ -224,7 +362,14 @@ class TestGeneratorContract:
             assert 0 <= img.min() and img.max() <= 255
 
     def test_broken_urls_are_skipped_not_yielded(self, tmp_path, monkeypatch):
-        # Mix of good and bad URLs; only the good ones should be yielded.
+        """A broken URL in the middle is dropped; the stream keeps going.
+
+        This is the core resilience guarantee: a single undecodable image
+        must not truncate the stream or raise — the two good images on either
+        side of it are still yielded.
+        """
+        # Arrange: a mock that returns garbage only for URLs containing "bad",
+        # and a valid PNG for everything else.
         good = _png_bytes()
 
         def fake_get(url, timeout=None):
@@ -233,6 +378,7 @@ class TestGeneratorContract:
             return _FakeResponse(good, status_ok=True)
 
         monkeypatch.setattr(ef.requests, "get", fake_get)
+        # Arrange: a split with the bad URL deliberately sandwiched between two good ones.
         _write_split_csv(
             tmp_path / "split_dataset.csv",
             rows=[
@@ -241,10 +387,13 @@ class TestGeneratorContract:
                 ("http://example.com/good2.png", "train"),
             ],
         )
+        # Act: drain the stream, suppressing the expected per-skip UserWarning
+        # so it does not clutter the test output (the skip itself is asserted below).
         import warnings
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")  # broken URL emits a UserWarning
             images = list(get_feature_stream("train", base_dir=str(tmp_path)))
+        # Assert: only the two decodable images survived.
         assert len(images) == 2  # the single broken URL was dropped
 
 
@@ -253,24 +402,46 @@ class TestGeneratorContract:
 # ===========================================================================
 
 class TestBGRConvention:
+    """The downloader must store images in OpenCV's BGR channel order.
+
+    Downstream OpenCV-based preprocessing assumes BGR, but PIL decodes to RGB.
+    These synthetic, network-free tests lock in the RGB->BGR conversion so a
+    silent channel-order regression (which would swap red/blue everywhere)
+    is caught.
+    """
+
     def test_rgb_to_bgr_swaps_red_and_blue(self):
-        # The decoder converts PIL-RGB to OpenCV-BGR; verify the channel swap.
+        """``cvtColor`` moves red from RGB index 0 to BGR index 2.
+
+        A unit check of the conversion primitive itself, independent of the
+        download path, so a failure here points at the colour conversion
+        rather than at I/O.
+        """
+        # Arrange: a solid pure-red image expressed in RGB order.
         rgb_solid = np.zeros((4, 4, 3), dtype=np.uint8)
         rgb_solid[:, :] = [255, 0, 0]  # pure red in RGB
+        # Act: convert to OpenCV's BGR ordering.
         bgr_solid = cv2.cvtColor(rgb_solid, cv2.COLOR_RGB2BGR)
-        # In BGR, red must live in channel index 2, and channel 0 must be 0.
+        # Assert: in BGR, red must live in channel index 2, and channel 0 must be 0.
         assert bgr_solid[0, 0, 2] == 255
         assert bgr_solid[0, 0, 0] == 0
 
     def test_downloaded_red_image_is_stored_as_bgr(self, monkeypatch):
-        # A red RGB source, once downloaded, must have its red in BGR channel 2.
+        """End-to-end: a downloaded red image lands with red in BGR channel 2.
+
+        Exercises the conversion *through* the real download path (not just
+        the primitive), proving ``_download_image`` applies the RGB->BGR swap.
+        """
+        # Arrange: stub the network to return a pure-red PNG.
         red_png = _png_bytes(color=(255, 0, 0))
 
         def fake_get(url, timeout=None):
             return _FakeResponse(red_png, status_ok=True)
 
         monkeypatch.setattr(ef.requests, "get", fake_get)
+        # Act
         img = _download_image("http://example.com/red.png")
+        # Assert: red sits in the BGR red channel, blue channel is empty.
         assert img[0, 0, 2] == 255  # red sits in the BGR red channel
         assert img[0, 0, 0] == 0    # blue channel empty
 
@@ -280,7 +451,21 @@ class TestBGRConvention:
 # ===========================================================================
 
 class TestFeatureExtractionIntegrity:
+    """Streamed images must survive the preprocessing pipeline intact.
+
+    Bridges the streamer and the ``image_preprocessing`` pipeline: an image
+    pulled from the (mocked) download path is pushed through a real pipeline
+    and the resulting feature vector is checked for shape, dtype and embedding
+    integrity (instruction 6 — no NaN/Inf, correct width, expected range).
+    """
+
     def test_streamed_image_through_pipeline_yields_dense_vector(self, mock_download_ok):
+        """A streamed image yields a dense, finite, correctly-shaped vector.
+
+        This is the key integration guarantee: the bytes coming out of the
+        streamer are compatible with the downstream pipeline and produce a
+        clean embedding rather than NaNs or a mis-shaped array.
+        """
         # Arrange: pull one mocked image straight from the download path.
         img = _download_image("http://example.com/sample.png")
 
@@ -301,9 +486,17 @@ class TestFeatureExtractionIntegrity:
         assert features.min() >= 0.0 and features.max() <= 1.0
 
     def test_individual_transforms_on_streamed_image(self, mock_download_ok):
-        # Mirrors verify_extract_features' direct to_grayscale / resize checks.
+        """Individual transforms accept a streamed image and reshape it correctly.
+
+        A finer-grained companion to the full-pipeline test: confirms the two
+        foundational transforms (grayscale collapse and resize) behave on real
+        streamed data, isolating shape regressions to a single transform.
+        """
+        # Arrange: pull one mocked image from the download path.
         img = _download_image("http://example.com/sample.png")
+        # Act: apply the two transforms directly.
         gray = to_grayscale(img)
         resized = resize_image(img, (64, 64), preserve_aspect=False)
+        # Assert: grayscale drops the channel axis; resize hits the exact target.
         assert gray.ndim == 2
         assert resized.shape == (64, 64, 3)
