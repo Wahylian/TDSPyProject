@@ -15,6 +15,8 @@ Fixture cheat-sheet
     small_color_image    -> (32, 32, 3)   uint8 image (fast pipeline tests)
     image_batch          -> list[np.ndarray] of color images (default 6)
     feature_matrix       -> (n_samples, n_features) float32 matrix
+    matrix_stack         -> (24, 32, 32)    float32 grayscale image stack
+    color_matrix_stack   -> (24, 32, 32, 3) float32 multi-channel image stack
     tmp_image_file       -> path to a real PNG written to a tmp dir
     fake_vgg16           -> seeds the module-level VGG16 cache with a stub model
 """
@@ -67,8 +69,30 @@ def image_batch(rng) -> List[np.ndarray]:
 
 @pytest.fixture
 def feature_matrix(rng) -> np.ndarray:
-    """A (40, 256) float32 feature matrix for reduce_dimensions tests."""
+    """A (40, 256) float32 feature matrix for vector reduce_dimensions tests."""
     return rng.random(size=(40, 256), dtype=np.float64).astype(np.float32)
+
+
+@pytest.fixture
+def matrix_stack(rng) -> np.ndarray:
+    """A (24, 32, 32) float32 stack of single-channel image matrices.
+
+    The natural input to the matrix reduction subgroup (``mat-pca`` / ``mat-jl``):
+    one 2D matrix per sample, as produced by a pipeline that omits ``vectorize``.
+    """
+    return rng.random(size=(24, 32, 32), dtype=np.float64).astype(np.float32)
+
+
+@pytest.fixture
+def color_matrix_stack(rng) -> np.ndarray:
+    """A (24, 32, 32, 3) float32 stack of multi-channel (BGR/RGB) image matrices.
+
+    The colour counterpart of ``matrix_stack``: one ``(height, width, channels)``
+    image per sample, as produced by a pipeline that omits both ``grayscale``
+    and ``vectorize``. Feeds the matrix reduction subgroup's multi-channel path,
+    where only the width axis is reduced and the channel axis is preserved.
+    """
+    return rng.random(size=(24, 32, 32, 3), dtype=np.float64).astype(np.float32)
 
 
 @pytest.fixture

@@ -87,6 +87,44 @@ features_batch = batch_process(images_list, pipeline)
 # Shape: (num_images, feature_dim)
 ```
 
+### Vector Reduction (classical models)
+```python
+from image_preprocessing import batch_process, ImagePipeline
+
+pipeline = ImagePipeline([
+    ('grayscale', {}),
+    ('resize', {'target_size': (128, 128)}),
+    ('normalize', {'method': 'minmax'}),
+    ('vectorize', {}),                                  # flatten to vectors
+    ('reduce', {'method': 'vec-pca', 'n_components': 128}),
+])
+X = batch_process(images_list, pipeline)  # (num_images, 128)
+```
+
+### Matrix Reduction (CNN / ViT inputs)
+```python
+from image_preprocessing import batch_process, ImagePipeline
+
+# Grayscale matrices
+pipeline = ImagePipeline([
+    ('grayscale', {}),
+    ('resize', {'target_size': (128, 128)}),
+    ('normalize', {'method': 'minmax'}),
+    # NO 'vectorize' — keep matrices
+    ('reduce', {'method': 'mat-pca', 'n_components': 32}),
+])
+M = batch_process(images_list, pipeline)  # (num_images, 128, 32) — rows preserved
+
+# Colour matrices (keep channels for CNNs/ViTs): drop 'grayscale' too
+colour_pipeline = ImagePipeline([
+    ('resize', {'target_size': (128, 128)}),
+    ('normalize', {'method': 'minmax'}),
+    # NO 'grayscale', NO 'vectorize' — keep (H, W, C)
+    ('reduce', {'method': 'mat-pca', 'n_components': 32}),
+])
+C = batch_process(images_list, colour_pipeline)  # (num_images, 128, 32, 3) — rows + channels preserved
+```
+
 ### Multiple Sizes (Experiment)
 ```python
 fast = ImagePipeline([('grayscale', {}), ('resize', {'target_size': (64, 64)}), ('vectorize', {})])
@@ -111,9 +149,32 @@ for pipeline, name in [(fast, '64'), (medium, '128'), (hq, '224')]:
 | `to_grayscale(img)` | - | 2D grayscale |
 | `reduce_noise(img, 'bilateral')` | bilateral | Denoised array |
 
-### Vectorization Methods
+### Vectorization Methods (optional step)
 - `'flat'`: Raw pixel flatten (default)
 - `'vgg16'`: VGG16 embedding from block5_pool (requires tensorflow)
+
+Omit the `('vectorize', {})` op entirely to keep each image as a 2D/3D matrix
+for CNN/ViT inputs.
+
+### Dimensionality Reduction Methods (`'reduce'` op)
+Vector subgroup — needs a `('vectorize', {})` step before it; input
+`(n_samples, n_features)`, output `(n_samples, n_components)`:
+- `'vec-pca'`: PCA, variance-preserving (requires scikit-learn)
+- `'vec-jl'`: Johnson–Lindenstrauss random projection (requires scikit-learn)
+
+Matrix subgroup — used **without** `vectorize`; reduces only the width
+(column) axis, preserving rows **and** colour channels. Pure NumPy. Accepts
+grayscale or multi-channel stacks:
+- grayscale: input `(n_samples, height, width)` → output `(n_samples, height, n_components)`
+- colour:    input `(n_samples, height, width, channels)` → output `(n_samples, height, n_components, channels)`
+
+Methods:
+- `'mat-pca'`: two-dimensional PCA on the column axis (one shared basis pooled across channels)
+- `'mat-jl'`: two-dimensional random projection of the column axis (shared across channels)
+
+- `None` (default): bypass — return input unchanged.
+
+Aliases: `'pca'` → `'vec-pca'`, `'jl'` / `'johnson-lindenstrauss'` → `'vec-jl'`.
 
 ### Normalization Methods
 - `'minmax'`: [0, 1] range
@@ -249,15 +310,21 @@ print(f"Infs: {np.isinf(features).sum()}")
 ## File Organization
 
 ```
-your_project/
-├── image_preprocessing.py           # Main module
-├── IMAGE_PREPROCESSING_GUIDE.md     # Full documentation
-├── integration_example.py           # Working examples
-├── PREPROCESSING_DELIVERABLE.md     # Completion report
-├── QUICK_REFERENCE.md              # This file
-├── extractfeatures.py              # Your feature extraction
-└── datasets/
-    └── images/
+TDSPyProject/
+├── image_preprocessing.py           # Facade — the single public import path
+├── preprocessing/                   # Implementation package
+│   ├── transforms.py                # grayscale / resize / normalize / denoise
+│   ├── vectorize.py                 # vectorize_image (optional step)
+│   ├── reduce.py                    # reduce_dimensions (vector + matrix)
+│   ├── pipeline.py                  # ImagePipeline, batch_process, compose
+│   └── io.py                        # image loaders
+├── prebuilt_pipelines.py            # Named ready-made pipelines
+├── integration_example.py           # Data/feature/train/eval helpers
+├── extract_features.py              # URL-metadata image streamer
+├── tests/                           # pytest suite
+└── Docs/
+    ├── IMAGE_PREPROCESSING_GUIDE.md # Full documentation
+    └── QUICK_REFERENCE.md           # This file
 ```
 
 ## Import Everything You Need
@@ -270,7 +337,8 @@ from image_preprocessing import (
     resize_image,
     to_grayscale,
     reduce_noise,
-    
+    reduce_dimensions,   # vector + matrix dimensionality reduction
+
     # Pipeline classes
     ImagePipeline,
     
@@ -285,22 +353,25 @@ from image_preprocessing import (
 )
 ```
 
-## Prebuilt Pipeline Templates (from integration_example.py)
+## Prebuilt Pipeline Templates (from prebuilt_pipelines.py)
 
 ```python
-from integration_example import PrebuiltPipelines
+from prebuilt_pipelines import PrebuiltPipelines
 
-# Fast (64×64)
-fast = PrebuiltPipelines.fast_pipeline()
-
-# Balanced (128×128)
-balanced = PrebuiltPipelines.svm_pipeline()
-
-# High Quality (224×224)
-hq = PrebuiltPipelines.hq_pipeline()
-
-# Custom without denoising
+# --- Vector outputs (classical models) ---
+fast = PrebuiltPipelines.fast_pipeline()            # 64×64 -> 4,096
+balanced = PrebuiltPipelines.svm_pipeline()         # 128×128 -> 16,384
+hq = PrebuiltPipelines.hq_pipeline()                # 224×224 -> 50,176
 no_denoise = PrebuiltPipelines.no_denoise_pipeline()
+
+# --- Vector reduction ---
+bypass = PrebuiltPipelines.reduction_bypass_pipeline()   # 'reduce' slot = None
+vec_pca = PrebuiltPipelines.vec_pca_pipeline(128)        # -> (n, 128)
+vec_jl = PrebuiltPipelines.vec_jl_pipeline(256)          # -> (n, 256)
+
+# --- Matrix reduction (CNN / ViT) ---
+mat_pca = PrebuiltPipelines.mat_pca_pipeline(32)         # -> (n, 128, 32)
+mat_jl = PrebuiltPipelines.mat_jl_pipeline(64)           # -> (n, 128, 64)
 ```
 
 ## Getting Help
@@ -325,17 +396,15 @@ print(pipeline)
 ## Testing Your Installation
 
 ```bash
-# Test all functions
-python image_preprocessing.py
-
-# Test integration example
-python integration_example.py
+# Run the full pytest suite
+pytest
 ```
 
-Both should complete without errors and show example outputs.
+This exercises every transform, vectorization, both reduction subgroups, and
+the composition patterns, and should complete without errors.
 
 ---
 
 **For detailed documentation, see:** `IMAGE_PREPROCESSING_GUIDE.md`  
-**For examples, see:** `integration_example.py`  
-**For full report, see:** `PREPROCESSING_DELIVERABLE.md`
+**For ready-made pipelines, see:** `prebuilt_pipelines.py`  
+**For data/train/eval helpers, see:** `integration_example.py`

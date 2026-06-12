@@ -2,7 +2,8 @@
 Image vectorization.
 
 Converts a 2D/3D image into a 1D feature vector suitable for traditional ML
-models (SVM, Random Forest, etc.). Supports two methods:
+models (SVM, Random Forest, etc.).
+Supports two methods:
 
 - ``'flat'``: Raw pixel flattening (optionally channel-preserving).
 - ``'vgg16'``: Pre-trained VGG16 feature embedding (block5_pool, 25088-dim).

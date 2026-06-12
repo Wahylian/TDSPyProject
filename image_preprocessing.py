@@ -38,8 +38,8 @@ from this file to the real implementation:
     resize_image               preprocessing/transforms.py   Per-image: resize (+aspect/pad)
     normalize_image            preprocessing/transforms.py   Per-image: pixel-value scaling
     reduce_noise               preprocessing/transforms.py   Per-image: denoising filters
-    vectorize_image            preprocessing/vectorize.py    Per-image: image -> 1D vector
-    reduce_dimensions          preprocessing/reduce.py       Batch-level: PCA / JL / bypass
+    vectorize_image            preprocessing/vectorize.py    Per-image: image -> 1D vector (optional)
+    reduce_dimensions          preprocessing/reduce.py       Batch-level: vector / matrix / bypass
     ImagePipeline              preprocessing/pipeline.py     Config-driven op chain
     batch_process              preprocessing/pipeline.py     Run a pipeline over many images
     compose                    preprocessing/pipeline.py     Right-to-left functional compose
@@ -64,25 +64,32 @@ How to use this API
            ('grayscale', {'force': True}),
            ('resize',    {'target_size': (64, 64)}),
            ('normalize', {'method': 'minmax'}),
-           ('vectorize', {}),
-           ('reduce',    {'method': 'pca', 'n_components': 64}),  # optional
+           ('vectorize', {}),                              # optional — omit for matrices
+           ('reduce',    {'method': 'vec-pca', 'n_components': 64}),  # optional
        ])
        features = pipeline.process(img)                  # per-image steps only
 
 3. Run the same pipeline across a batch — this is the only context in which the
-   batch-level ``'reduce'`` step (PCA / Johnson–Lindenstrauss) is actually fit::
+   batch-level ``'reduce'`` step is actually fit::
 
        from image_preprocessing import batch_process
        X = batch_process([img] * 200, pipeline)          # (200, n_components)
 
+Vectorize is optional:
+    Include ``'vectorize'`` to get flat vectors for classical models (SVM,
+    Random Forest); pair it with a ``'vec-*'`` reduction method. Omit it to keep
+    each image a 2D matrix for CNNs/ViTs; pair that with a ``'mat-*'`` reduction
+    method, which compresses the matrix while preserving its row structure.
+
 Per-image vs batch-level routing (important):
     Every transform except ``'reduce'`` operates on a single image. ``'reduce'``
-    needs a whole feature matrix to fit, so:
+    needs the whole batch to fit, so:
       * ``pipeline.process(image)`` treats ``('reduce', {'method': None})`` as a
-        no-op and raises a helpful ``ValueError`` for PCA/JL on a lone image.
+        no-op and raises a helpful ``ValueError`` for a fitting method on a lone
+        image.
       * ``batch_process(images, pipeline)`` splits the chain, runs per-image ops
-        on each image, stacks the vectors, then fits the reducer once over the
-        full batch. Use this whenever a ``'reduce'`` step is present.
+        on each image, stacks the results, then fits the reducer once over the
+        full batch. Use this whenever a fitting ``'reduce'`` step is present.
 
 --------------------------------------------------------------------------------
 Requirements
@@ -92,13 +99,8 @@ Requirements
     - scikit-image
     - Pillow
     - tensorflow / keras   (optional; only for method='vgg16' embeddings)
-    - scikit-learn         (optional; only for PCA / Johnson–Lindenstrauss reduction)
-
-Backward compatibility:
-    The facade name and every exported symbol are unchanged from before the
-    package split, so existing imports such as
-    ``from image_preprocessing import ImagePipeline, vectorize_image, batch_process``
-    continue to work verbatim.
+    - scikit-learn         (optional; only for the 'vec-pca' / 'vec-jl' reductions —
+                            the 'mat-pca' / 'mat-jl' matrix reductions are pure NumPy)
 """
 
 # =============================================================================
@@ -139,10 +141,10 @@ from preprocessing.io import (
     load_image_from_pil,
 )
 
-# Legacy alias: the pre-split single-file module exposed ``_vgg16_models`` as a
-# module-level VGG16 weight cache. It is a private implementation detail (note the
-# leading underscore) and is intentionally NOT part of ``__all__``, but the alias
-# is preserved so any code that imported it directly keeps working.
+# ``_vgg16_models`` is the module-level VGG16 weight cache — a private
+# implementation detail (note the leading underscore) deliberately kept out of
+# ``__all__``. It is re-exported here so tests and advanced callers can seed or
+# inspect the cache directly.
 from preprocessing.vectorize import _vgg16_models  # noqa: F401
 
 # =============================================================================

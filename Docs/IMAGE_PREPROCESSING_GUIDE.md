@@ -2,11 +2,11 @@
 
 ## Overview
 
-The image preprocessing layer provides a production-ready, modular pipeline designed for traditional ML models (SVM, Random Forest, etc.). It features:
+The image preprocessing layer provides a production-ready, modular pipeline serving both classical ML models (SVM, Random Forest) and matrix-native models (CNNs, ViTs). It features:
 
-✅ **Flexible image vectorization** — flat pixel vectors or VGG16 deep embeddings  
+✅ **Optional image vectorization** — flatten to vectors for classical models, or omit it to keep matrices for CNNs/ViTs  
 ✅ **4 powerful per-image preprocessing operations** (normalization, resizing, grayscale, denoising)  
-✅ **NEW (2026-06): Optional dimensionality-reduction step** (None / PCA / Johnson–Lindenstrauss)  
+✅ **Optional dimensionality reduction in two subgroups** — vector (`vec-pca` / `vec-jl`) and matrix (`mat-pca` / `mat-jl`), plus a `None` bypass  
 ✅ **3 composition patterns** for flexible pipeline configuration  
 ✅ **Full type hints and comprehensive docstrings**  
 ✅ **Batch processing support**  
@@ -14,18 +14,18 @@ The image preprocessing layer provides a production-ready, modular pipeline desi
 
 ---
 
-## File organization (2026-06 refactor)
+## File organization
 
-The monolithic 788-line `image_preprocessing.py` has been split into a small package. **Existing import paths still work** — `image_preprocessing.py` is now a thin re-export shim.
+The implementation lives in a small `preprocessing/` package behind a single facade. Import **only** from `image_preprocessing` — the facade re-exports the whole public API from one stable path.
 
 ```
-TDSPyProject-New_Vectorization/
-├── image_preprocessing.py        # Backward-compatible facade (re-exports public API)
-└── preprocessing/                # NEW package containing the implementation
+TDSPyProject/
+├── image_preprocessing.py        # Facade — the single public import path
+└── preprocessing/                # Implementation package
     ├── __init__.py               # Re-exports everything below
     ├── transforms.py             # to_grayscale, resize_image, normalize_image, reduce_noise
-    ├── vectorize.py              # vectorize_image (flat + VGG16)
-    ├── reduce.py                 # NEW: reduce_dimensions (None / PCA / Johnson–Lindenstrauss)
+    ├── vectorize.py              # vectorize_image (flat + VGG16) — optional step
+    ├── reduce.py                 # reduce_dimensions (vector + matrix subgroups, + bypass)
     ├── pipeline.py               # ImagePipeline, batch_process, compose, pipeline_decorator
     └── io.py                     # load_image_from_{bytes,file,pil}
 ```
@@ -33,28 +33,31 @@ TDSPyProject-New_Vectorization/
 Both import styles are supported:
 
 ```python
-# Legacy / preferred for existing code (unchanged behavior):
+# Facade (preferred — one path to remember):
 from image_preprocessing import ImagePipeline, vectorize_image, batch_process
 
-# New, package-style (slightly clearer for new code):
+# Package-style (equivalent):
 from preprocessing import ImagePipeline, reduce_dimensions
 from preprocessing.transforms import to_grayscale
 ```
-
-`integration_example.py` and `verify_extract_features.py` continue to use the legacy facade and require **no changes** to their existing imports.
 
 ---
 
 ## Pipeline architecture
 
-The pipeline now distinguishes two kinds of operations:
+The pipeline distinguishes two kinds of operations:
 
 | Kind | Examples | Applied by |
 |------|----------|------------|
 | **Per-image** | `grayscale`, `resize`, `denoise`, `normalize`, `vectorize` | `ImagePipeline.process(image)` — runs on each image independently |
-| **Batch-level** (NEW) | `reduce` (PCA / JL) | `batch_process(images, pipeline)` — runs once on the stacked feature matrix |
+| **Batch-level** | `reduce` (`vec-*` / `mat-*`) | `batch_process(images, pipeline)` — runs once on the stacked batch |
 
-`batch_process` automatically splits a pipeline into its per-image and batch-level segments, applies the per-image ops to each image, stacks the results into a `(n_samples, n_features)` matrix, and then runs the batch-level ops (currently only `'reduce'`) once on that matrix. Pipelines without a `'reduce'` step behave exactly as before.
+`batch_process` splits a pipeline into its per-image and batch-level segments, applies the per-image ops to each image, and stacks the results. **Vectorization is optional** and decides the stacked shape:
+
+- **With** a `'vectorize'` step, each image is a 1D vector, so the stack is a `(n_samples, n_features)` matrix → pair with a **vector** reduce method (`vec-pca` / `vec-jl`).
+- **Without** `'vectorize'`, each image stays a matrix, so the stack is a `(n_samples, height, width)` grayscale stack (or `(n_samples, height, width, channels)` if `'grayscale'` is also omitted) → pair with a **matrix** reduce method (`mat-pca` / `mat-jl`), which preserves the channel axis.
+
+The batch-level `'reduce'` op (if present) then runs once on that stack. Pipelines with no `'reduce'` step simply return the stacked vectors or matrices.
 
 ---
 
@@ -72,19 +75,21 @@ For VGG16 embeddings, also install TensorFlow:
 pip install tensorflow
 ```
 
-For the new dimensionality-reduction step (PCA / Johnson–Lindenstrauss):
+For the **vector** dimensionality-reduction methods (`vec-pca` / `vec-jl`):
 
 ```bash
 pip install scikit-learn
 ```
 
-`scikit-learn` is lazy-imported only when `method='pca'` or `method='johnson_lindenstrauss'`, so users that stick with `method=None` (the default) do not need to install it.
+`scikit-learn` is lazy-imported only when `method='vec-pca'` or `method='vec-jl'`. The **matrix** methods (`mat-pca` / `mat-jl`) are pure NumPy and need no extra install, and the `None` bypass (the default) needs nothing either.
 
 ---
 
 ## Core Function: `vectorize_image()`
 
-Converts 2D/3D image arrays into 1D feature vectors for ML models.
+Converts 2D/3D image arrays into 1D feature vectors for ML models. This step is
+**optional**: include it to feed classical vector models (SVM, Random Forest);
+omit it to keep each image as a 2D/3D matrix for CNNs and ViTs.
 
 ### Parameters
 
@@ -236,29 +241,59 @@ median_filtered = reduce_noise(image, method='median', kernel_size=5)
 
 ---
 
-### 5. `reduce_dimensions()` — Dimensionality Reduction (NEW 2026-06)
+### 5. `reduce_dimensions()` — Dimensionality Reduction
 
-Optional final pipeline step that compresses the post-vectorization feature
-vector. Useful when raw flat features are very high-dimensional
-(e.g. `224×224×3 = 150 528`) and downstream training would benefit from
-a smaller feature space.
+Optional final pipeline step that compresses the feature representation before
+training. It comes in **two subgroups** selected by `method`, so the same step
+serves both classical vector models and matrix-native models:
 
-**Methods:**
+#### Vector subgroup — for flat vectors `(n_samples, n_features)`
+
+Pair these with a pipeline that **includes** `'vectorize'`.
 
 | `method` value | What it does | Data-dependent? | Library |
 |---|---|---|---|
-| `None` (default) or `'none'` | **Bypass** — returns input unchanged. Backward-compatible no-op. | n/a | none |
-| `'pca'` | Principal Component Analysis: keeps directions of maximum variance. | Yes (must be *fit* on a batch). | `scikit-learn` |
-| `'johnson_lindenstrauss'` | Gaussian random projection (`GaussianRandomProjection`). Distortion of pairwise distances bounded by the JL lemma. | No (projection matrix is random). | `scikit-learn` |
+| `'vec-pca'` | Principal Component Analysis: keeps directions of maximum variance. | Yes (fit on a batch). | `scikit-learn` |
+| `'vec-jl'` | Gaussian random projection (`GaussianRandomProjection`). Distortion of pairwise distances bounded by the Johnson–Lindenstrauss lemma. | No (random matrix). | `scikit-learn` |
 
-The string alias `'johnson-lindenstrauss'` (with a hyphen) and case-insensitive matching are also accepted, so YAML/JSON configs work cleanly.
+Output shape: `(n_samples, n_components)`.
+
+#### Matrix subgroup — for image stacks (grayscale or colour)
+
+Pair these with a pipeline that **omits** `'vectorize'` (each image stays a
+matrix). Only the width (column) axis is reduced, so the row layout CNNs/ViTs
+rely on — **and the colour channels** — are preserved. Both are pure NumPy — no
+`scikit-learn` needed. Grayscale and multi-channel (BGR/RGB) stacks are both
+accepted; the channel axis, when present, is carried through untouched:
+
+| Input | Stack shape | Output shape |
+|---|---|---|
+| Grayscale (drop `vectorize`, keep `grayscale`) | `(n_samples, height, width)` | `(n_samples, height, n_components)` |
+| Colour (drop both `grayscale` and `vectorize`) | `(n_samples, height, width, channels)` | `(n_samples, height, n_components, channels)` |
+
+| `method` value | What it does | Data-dependent? | Library |
+|---|---|---|---|
+| `'mat-pca'` | Two-dimensional PCA: projects the column axis onto the leading eigenvectors of the batch column-covariance matrix. For colour input the covariance is pooled across channels, so one shared basis is applied to every channel. | Yes (fit on a batch). | none (NumPy) |
+| `'mat-jl'` | Two-dimensional Gaussian random projection of the column axis, shared across channels. | No (random matrix). | none (NumPy) |
+
+#### Bypass
+
+| `method` value | What it does |
+|---|---|
+| `None` (default) or `'none'` | **Bypass** — returns the input unchanged (vector *or* matrix). A no-op slot for easy A/B comparison. |
+
+**Aliases for ease of use:** matching is case-insensitive and treats `-`/`_` the
+same, and the terse aliases `'pca'` → `'vec-pca'`, `'jl'` /
+`'johnson-lindenstrauss'` → `'vec-jl'` are accepted, so configs stay concise.
 
 **Important shape rules:**
-- `reduce_dimensions` expects a 2-D matrix of shape `(n_samples, n_features)`.
-- PCA needs `n_samples ≥ n_components`. The function clamps `n_components` to `min(n_samples, n_features)` automatically.
-- Inside `ImagePipeline.process(image)` (single image, 1-D vector):
+- The `method` subgroup decides how the input rank is read:
+  - Vector methods: 2D `(n_samples, n_features)` is a batch; a bare 1D vector is a single sample.
+  - Matrix methods: a grayscale batch is 3D `(n_samples, height, width)` and a colour batch is 4D `(n_samples, height, width, channels)`; a single image is one rank lower (`(height, width)` grayscale or `(height, width, channels)` colour). A fitted reducer records whether it was trained on grayscale or colour, so it reads single-sample rank correctly at inference time.
+- `vec-pca` needs `n_samples ≥ n_components`; it clamps `n_components` to `min(n_samples, n_features)`. The random projections clamp `n_components` to the input width.
+- Inside `ImagePipeline.process(image)` (a single image):
   - `method=None` → pass-through.
-  - `method='pca'` / `'johnson_lindenstrauss'` without a pre-fit `reducer` → raises `ValueError` (cannot fit on one sample). Use `batch_process` instead, or pass an already-fitted `reducer` via the op kwargs.
+  - A fitting method (`vec-*` / `mat-*`) without a pre-fit `reducer` → raises `ValueError` (cannot fit on one sample). Use `batch_process`, or pass an already-fitted `reducer` via the op kwargs.
 
 **Direct usage:**
 
@@ -266,26 +301,48 @@ The string alias `'johnson-lindenstrauss'` (with a hyphen) and case-insensitive 
 from image_preprocessing import reduce_dimensions
 import numpy as np
 
+# --- Vector subgroup: flat (n_samples, n_features) features ---
 X_train = np.random.rand(200, 4096).astype(np.float32)
 X_test  = np.random.rand( 50, 4096).astype(np.float32)
 
-# 1. Bypass — no-op.
-X_same = reduce_dimensions(X_train, method=None)
-assert X_same is X_train  # identity
+# Bypass — no-op.
+assert reduce_dimensions(X_train, method=None) is X_train
 
-# 2. PCA — fit on train, RE-APPLY to test using the same reducer.
+# PCA — fit on train, RE-APPLY to test using the same reducer.
 X_train_pca, pca = reduce_dimensions(
-    X_train, method='pca', n_components=64,
+    X_train, method='vec-pca', n_components=64,
     random_state=42, return_reducer=True,
 )
 X_test_pca = reduce_dimensions(X_test, reducer=pca)  # transform-only
 
-# 3. Johnson–Lindenstrauss random projection.
+# Johnson–Lindenstrauss random projection.
 X_train_jl, jl = reduce_dimensions(
-    X_train, method='johnson_lindenstrauss', n_components=256,
+    X_train, method='vec-jl', n_components=256,
     random_state=42, return_reducer=True,
 )
 X_test_jl = reduce_dimensions(X_test, reducer=jl)
+
+# --- Matrix subgroup: image stacks (n_samples, height, width) ---
+imgs_train = np.random.rand(200, 128, 128).astype(np.float32)
+imgs_test  = np.random.rand( 50, 128, 128).astype(np.float32)
+
+# 2D-PCA — each image -> (128, 32), rows preserved.
+mat_train, mat_pca = reduce_dimensions(
+    imgs_train, method='mat-pca', n_components=32, return_reducer=True,
+)
+mat_test = reduce_dimensions(imgs_test, reducer=mat_pca)
+print(mat_train.shape, mat_test.shape)  # (200, 128, 32) (50, 128, 32)
+
+# --- Matrix subgroup, COLOUR: stacks (n_samples, height, width, channels) ---
+rgb_train = np.random.rand(200, 128, 128, 3).astype(np.float32)
+rgb_test  = np.random.rand( 50, 128, 128, 3).astype(np.float32)
+
+# Width reduced, channels preserved -> each image (128, 32, 3).
+rgb_r, rgb_pca = reduce_dimensions(
+    rgb_train, method='mat-pca', n_components=32, return_reducer=True,
+)
+rgb_test_r = reduce_dimensions(rgb_test, reducer=rgb_pca)
+print(rgb_r.shape, rgb_test_r.shape)  # (200, 128, 32, 3) (50, 128, 32, 3)
 ```
 
 **Via `ImagePipeline` (the recommended end-to-end form):**
@@ -293,56 +350,73 @@ X_test_jl = reduce_dimensions(X_test, reducer=jl)
 ```python
 from image_preprocessing import ImagePipeline, batch_process
 
-pipeline = ImagePipeline([
+# Vector pipeline: vectorize, then reduce the flat vectors.
+vector_pipeline = ImagePipeline([
     ('grayscale', {}),
     ('resize', {'target_size': (128, 128), 'preserve_aspect': True}),
     ('normalize', {'method': 'minmax'}),
     ('vectorize', {}),
-    # NEW step: choose None / 'pca' / 'johnson_lindenstrauss'.
-    ('reduce', {'method': 'pca', 'n_components': 128, 'random_state': 42}),
+    ('reduce', {'method': 'vec-pca', 'n_components': 128, 'random_state': 42}),
 ])
-
-# batch_process splits the pipeline into per-image + batch-level segments,
-# runs grayscale → resize → normalize → vectorize on each image, then fits
-# PCA once on the resulting (n_samples, 128*128) matrix.
-X = batch_process(images, pipeline)
+X = batch_process(images, vector_pipeline)
 print(X.shape)  # (n_samples, 128)
+
+# Matrix pipeline: NO vectorize — reduce the grayscale image matrices directly.
+matrix_pipeline = ImagePipeline([
+    ('grayscale', {}),
+    ('resize', {'target_size': (128, 128), 'preserve_aspect': True}),
+    ('normalize', {'method': 'minmax'}),
+    ('reduce', {'method': 'mat-pca', 'n_components': 32, 'random_state': 42}),
+])
+M = batch_process(images, matrix_pipeline)
+print(M.shape)  # (n_samples, 128, 32) — CNN/ViT-ready matrices
+
+# Colour matrix pipeline: drop BOTH grayscale and vectorize — keep channels.
+colour_pipeline = ImagePipeline([
+    ('resize', {'target_size': (128, 128), 'preserve_aspect': True}),
+    ('normalize', {'method': 'minmax'}),
+    ('reduce', {'method': 'mat-pca', 'n_components': 32, 'random_state': 42}),
+])
+C = batch_process(images, colour_pipeline)
+print(C.shape)  # (n_samples, 128, 32, 3) — channels preserved for CNN/ViT
 ```
 
-**Choosing between methods:**
+**Choosing a method:**
 
 | Situation | Recommended `method` |
 |---|---|
-| You want a maximum-information-preserving projection and can afford one PCA fit on the training data. | `'pca'` |
-| You want zero training cost and only need approximate pairwise-distance preservation (e.g. for nearest-neighbor / similarity search). | `'johnson_lindenstrauss'` |
-| Backward compatibility with existing pipelines, or downstream model is already efficient. | `None` |
+| Classical model (SVM / RF) and you can afford one PCA fit on the training data. | `'vec-pca'` |
+| Classical model, zero training cost, only need approximate distance preservation. | `'vec-jl'` |
+| Matrix-native model (CNN / ViT), want to keep spatial structure while shrinking width, variance-preserving. | `'mat-pca'` |
+| Matrix-native model, want a free, data-independent width reduction. | `'mat-jl'` |
+| No reduction (full features) or a placeholder slot for A/B comparison. | `None` |
 
 **Train/test correctness:**
 
-When using PCA or JL across train/test splits, **always fit the reducer on the
-training set and re-apply it to the test set** — never refit per split. The
-recommended pattern (also demonstrated in `integration_example.py`):
+Across train/test splits, **always fit the reducer on the training set and
+re-apply it to the test set** — never refit per split. The pattern is identical
+for both subgroups; only the method name and input shape differ:
 
 ```python
 from image_preprocessing import ImagePipeline, batch_process, reduce_dimensions
 
-# 1. Build a per-image-only sub-pipeline (no 'reduce' op).
+# 1. Build a per-image-only sub-pipeline (drop the 'reduce' op).
 full = ImagePipeline([
     ('grayscale', {}),
     ('resize', {'target_size': (128, 128)}),
     ('normalize', {'method': 'minmax'}),
     ('vectorize', {}),
-    ('reduce', {'method': 'pca', 'n_components': 128}),
+    ('reduce', {'method': 'vec-pca', 'n_components': 128}),
 ])
 per_image = ImagePipeline(full.per_image_operations())
 
-# 2. Vectorize both splits with the per-image pipeline.
+# 2. Run the per-image stages on both splits.
 X_train_raw = batch_process(train_images, per_image)
 X_test_raw  = batch_process(test_images,  per_image)
 
-# 3. Fit reducer on train, transform both with the *same* fitted reducer.
+# 3. Fit the reducer on train, transform both with the *same* fitted reducer.
 X_train, reducer = reduce_dimensions(
-    X_train_raw, method='pca', n_components=128,
+    X_train_raw, method='vec-pca', n_components=128,
     random_state=42, return_reducer=True,
 )
 X_test = reduce_dimensions(X_test_raw, reducer=reducer)
@@ -696,17 +770,15 @@ pipeline = CustomPipeline([
 
 ## Testing
 
-Run the included examples:
+The full behaviour of the API is covered by the pytest suite under `tests/`:
 
 ```bash
-python image_preprocessing.py
+pytest
 ```
 
-This will output shape and value range information for:
-- Individual function demonstrations
-- Pipeline class usage
-- Functional composition
-- Batch processing
+The suite asserts shapes, dtypes and value ranges for the individual transforms,
+vectorization, both reduction subgroups (vector and matrix), the per-image vs
+batch-level split, and the composition patterns.
 
 ---
 
@@ -716,12 +788,12 @@ This will output shape and value range information for:
 
 | Function | Purpose | Returns | Module |
 |----------|---------|---------|--------|
-| `vectorize_image()` | Convert image to 1D vector (flat or vgg16) | np.ndarray (1D) | `preprocessing.vectorize` |
+| `vectorize_image()` | Convert image to 1D vector (flat or vgg16); optional step | np.ndarray (1D) | `preprocessing.vectorize` |
 | `normalize_image()` | Normalize pixel values | np.ndarray (float32) | `preprocessing.transforms` |
 | `resize_image()` | Resize image | np.ndarray (resized) | `preprocessing.transforms` |
 | `to_grayscale()` | Convert to grayscale | np.ndarray (2D) | `preprocessing.transforms` |
 | `reduce_noise()` | Denoise image | np.ndarray (denoised) | `preprocessing.transforms` |
-| `reduce_dimensions()` **(new)** | Project features to lower dim (None / PCA / JL) | np.ndarray, or (np.ndarray, reducer) | `preprocessing.reduce` |
+| `reduce_dimensions()` | Reduce features — vector (`vec-pca`/`vec-jl`), matrix (`mat-pca`/`mat-jl`), or `None` bypass | np.ndarray, or (np.ndarray, reducer) | `preprocessing.reduce` |
 | `compose()` | Functional composition | Callable | `preprocessing.pipeline` |
 | `pipeline_decorator()` | Decorator for pipelines | Callable (decorator) | `preprocessing.pipeline` |
 | `batch_process()` | Process multiple images (and apply batch-level reduce) | np.ndarray (batch) | `preprocessing.pipeline` |
@@ -746,16 +818,29 @@ help(ImagePipeline.process)
 
 ---
 
-**Version:** 1.2  
-**Last Updated:** 2026-06-10  
+**Version:** 1.4  
+**Last Updated:** 2026-06-12  
 **Production Ready:** ✅
 
 ### Changelog
 
-- **1.2 (2026-06-10)** — Refactored single-file `image_preprocessing.py` into the
-  `preprocessing/` package (transforms / vectorize / reduce / pipeline / io).
-  Added new `reduce_dimensions()` function and `'reduce'` pipeline op with
-  three modes: `None` (bypass), `'pca'`, `'johnson_lindenstrauss'`.
-  100 % backward compatible — all previous imports and pipelines behave
-  identically.
+- **1.4 (2026-06-12)** — Matrix reduction (`'mat-pca'` / `'mat-jl'`) now accepts
+  multi-channel (BGR/RGB) image stacks. A colour stack
+  `(n_samples, height, width, channels)` reduces to
+  `(n_samples, height, n_components, channels)` — only the width axis is
+  projected (one shared basis pooled across channels for `mat-pca`), so rows and
+  colour channels are preserved for CNN/ViT inputs. Fitted reducers record
+  whether they were trained on grayscale or colour and read single-sample rank
+  accordingly. The vector subgroup is already channel-agnostic (vectorization
+  folds channels into the feature axis).
+- **1.3 (2026-06-12)** — Vectorization is now explicitly optional, and
+  `reduce_dimensions()` is split into two subgroups: **vector** (`'vec-pca'` /
+  `'vec-jl'`, on flat `(n_samples, n_features)` matrices) and **matrix**
+  (`'mat-pca'` / `'mat-jl'`, on `(n_samples, height, width)` image stacks,
+  reducing the width axis while preserving rows for CNN/ViT inputs). The matrix
+  methods are pure NumPy. Short aliases `'pca'` → `'vec-pca'` and
+  `'johnson-lindenstrauss'` → `'vec-jl'` are accepted.
+- **1.2 (2026-06-10)** — Split `image_preprocessing.py` into the
+  `preprocessing/` package (transforms / vectorize / reduce / pipeline / io) and
+  added the `reduce_dimensions()` function and `'reduce'` pipeline op.
 - **1.1 (2026-06-09)** — VGG16 vectorization support.

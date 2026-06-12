@@ -1,8 +1,8 @@
 """
 Composable preprocessing pipeline.
 
-This module wires the per-image transforms (``transforms.py``), the
-vectorization step (``vectorize.py``) and the new batch-level dimensionality
+This module wires the per-image transforms (``transforms.py``),
+the vectorization step (``vectorize.py``) and the batch-level dimensionality
 reducer (``reduce.py``) into a single configurable pipeline.
 
 Three composition patterns are exported:
@@ -12,23 +12,30 @@ Three composition patterns are exported:
 - ``pipeline_decorator`` — decorator that runs preprocessing before a
   user-supplied function receives the image.
 
+Vectorization is optional
+--------------------------
+The ``'vectorize'`` step is just one op among many. Include it to produce flat
+feature vectors for classical models (SVM, Random Forest). Omit it to keep each
+image as a 2D/3D matrix — the form CNNs and ViTs consume directly. The
+``'reduce'`` step supports both: its vector methods reduce flat vectors and its
+matrix methods reduce image matrices (see :func:`reduce_dimensions`).
+
 Per-image vs batch-level operations
 -----------------------------------
 All transforms (grayscale, resize, denoise, normalize, vectorize) act on a
-single image. The new ``'reduce'`` step (PCA / Johnson–Lindenstrauss) acts on
-a batch of feature vectors. To keep backward compatibility intact:
+single image. The ``'reduce'`` step acts on a *batch* — it needs multiple
+samples to fit:
 
-- ``ImagePipeline.process(image)`` runs every *per-image* op and treats
-  ``'reduce'`` with ``method=None`` as a no-op. With ``method='pca'`` /
-  ``'johnson_lindenstrauss'`` it raises a helpful ``ValueError`` (PCA on a
-  single sample is undefined) unless the op kwargs include a pre-fit
-  ``reducer``.
+- ``ImagePipeline.process(image)`` runs every per-image op and treats
+  ``'reduce'`` with ``method=None`` as a no-op. With a fitting method it raises
+  a helpful ``ValueError`` (a reducer cannot be fit on one sample) unless the op
+  kwargs include a pre-fit ``reducer``.
 - ``batch_process(images, pipeline)`` splits the pipeline into per-image and
   batch-level segments, runs the per-image segment on each image, stacks the
-  resulting vectors into ``(n_samples, n_features)``, then applies the
-  batch-level reducer once across the full matrix.
-
-Old pipelines that never used ``'reduce'`` are not affected by these changes.
+  results — into ``(n_samples, n_features)`` when vectorized, or a matrix stack
+  when not (``(n_samples, height, width)`` for grayscale,
+  ``(n_samples, height, width, channels)`` for colour) — then applies the
+  batch-level reducer once across the full stack.
 """
 
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -54,30 +61,41 @@ class ImagePipeline:
     ``(function_name, kwargs)``.
 
     Supported operations:
-        - ``'vectorize'`` — Convert image to 1D feature vector
-          (:func:`vectorize_image`)
-        - ``'normalize'`` — Normalize pixel values (:func:`normalize_image`)
-        - ``'resize'`` — Resize image (:func:`resize_image`)
         - ``'grayscale'`` — Convert to grayscale (:func:`to_grayscale`)
+        - ``'resize'`` — Resize image (:func:`resize_image`)
         - ``'denoise'`` — Reduce noise (:func:`reduce_noise`)
-        - ``'reduce'`` — **NEW.** Optional dimensionality reduction (PCA /
-          Johnson–Lindenstrauss / bypass) on the post-vectorize feature
-          vector. See :func:`reduce_dimensions`. This is a *batch-level* op
-          and is only meaningful inside :func:`batch_process`; on a single
-          image it is a no-op for ``method=None`` and an error for the
-          PCA/JL methods (because they require multiple samples to fit).
+        - ``'normalize'`` — Normalize pixel values (:func:`normalize_image`)
+        - ``'vectorize'`` — Optionally flatten the image to a 1D feature vector
+          (:func:`vectorize_image`). Omit it to keep a 2D/3D matrix for
+          CNN/ViT inputs.
+        - ``'reduce'`` — Optional dimensionality reduction
+          (:func:`reduce_dimensions`). Vector methods (``'vec-pca'`` /
+          ``'vec-jl'``) reduce flat vectors; matrix methods (``'mat-pca'`` /
+          ``'mat-jl'``) reduce image matrices; ``None`` is a bypass. This is a
+          *batch-level* op and is only meaningful inside :func:`batch_process`;
+          on a single image it is a no-op for ``method=None`` and an error for
+          the fitting methods (they require multiple samples to fit).
 
     Example:
+        >>> # Vector pipeline: flatten, then reduce the flat vectors with PCA.
         >>> pipeline = ImagePipeline([
         ...     ('grayscale', {}),
         ...     ('resize', {'target_size': (64, 64)}),
         ...     ('normalize', {'method': 'minmax'}),
         ...     ('vectorize', {}),
-        ...     ('reduce', {'method': 'pca', 'n_components': 64}),
+        ...     ('reduce', {'method': 'vec-pca', 'n_components': 64}),
         ... ])
         >>> image = np.random.randint(0, 256, (224, 224, 3), dtype=np.uint8)
-        >>> features = pipeline.process(image)        # per-image only
-        >>> batch = batch_process([image]*200, pipeline)  # applies PCA across the batch
+        >>> features = pipeline.process(image)            # per-image only
+        >>> batch = batch_process([image]*200, pipeline)  # fits PCA across the batch
+        >>> # Matrix pipeline: no 'vectorize', reduce the image matrices directly.
+        >>> matrix_pipeline = ImagePipeline([
+        ...     ('grayscale', {}),
+        ...     ('resize', {'target_size': (64, 64)}),
+        ...     ('normalize', {'method': 'minmax'}),
+        ...     ('reduce', {'method': 'mat-pca', 'n_components': 16}),
+        ... ])
+        >>> batch = batch_process([image]*200, matrix_pipeline)  # (200, 64, 16)
     """
 
     # Map operation names to functions. ``'reduce'`` is intentionally listed
@@ -134,11 +152,11 @@ class ImagePipeline:
             Processed image / vector after all operations.
 
             For a pipeline that ends with ``('reduce', {'method': None, ...})``
-            this returns the raw vectorized features (the reduce step is a
-            no-op for ``method=None``). For PCA / JL methods, calling
-            ``process`` on a single image without a pre-fit ``reducer``
-            raises ``ValueError`` — use :func:`batch_process` instead, which
-            handles the batch-level reduction.
+            this returns the per-image output unchanged (the reduce step is a
+            no-op for ``method=None``). For a fitting method (``vec-*`` /
+            ``mat-*``), calling ``process`` on a single image without a pre-fit
+            ``reducer`` raises ``ValueError`` — use :func:`batch_process`
+            instead, which handles the batch-level reduction.
 
         Raises:
             RuntimeError: If any operation fails (with context about which
@@ -272,33 +290,36 @@ def batch_process(
     The pipeline is split into two segments:
 
     1. **Per-image** ops (grayscale, resize, denoise, normalize, vectorize) are
-       run independently on each image and the results are stacked into a
-       feature matrix of shape ``(n_images, n_features)``.
+       run independently on each image and the results are stacked. With a
+       ``'vectorize'`` step each image is a 1D vector, so the stack is a
+       ``(n_images, n_features)`` matrix; without it each image stays a matrix,
+       so the stack is ``(n_images, height, width)`` for grayscale or
+       ``(n_images, height, width, channels)`` for colour input.
     2. **Batch-level** ops — currently only ``'reduce'`` — are then applied
-       once to that matrix. This is where PCA / Johnson–Lindenstrauss actually
-       get fit (they need multiple samples to be meaningful).
+       once to that stack. This is where the reducer is fit (it needs multiple
+       samples to be meaningful). Vector ``'reduce'`` methods consume the 2D
+       matrix; matrix methods consume the 3D/4D image stack.
 
-    For pipelines without any batch-level ops, this function is exactly
-    equivalent to calling ``pipeline.process`` on each image and stacking the
-    results — fully backward compatible.
+    For pipelines without any batch-level ops, this is equivalent to calling
+    ``pipeline.process`` on each image and stacking the results.
 
     Args:
         images: List of image arrays.
         pipeline: :class:`ImagePipeline` instance.
 
     Returns:
-        ``np.ndarray`` of shape ``(n_images, processed_dim)``. ``processed_dim``
-        equals the vectorized dimension when no ``'reduce'`` step is present,
-        or the post-reduction dimension when one is.
+        ``np.ndarray`` whose leading axis is ``n_images``. The trailing shape is
+        the vectorized width (vector pipelines), the image height/width (matrix
+        pipelines without ``'reduce'``), or the post-reduction shape when a
+        ``'reduce'`` step is present.
 
     Notes:
-        Each batch-level ``'reduce'`` op currently fits a *fresh* reducer on
-        the supplied images. If you need to reuse the same PCA/JL projection
-        across train/test splits, call :func:`reduce_dimensions` directly with
-        ``return_reducer=True`` on the training features and pass the fitted
-        ``reducer`` back via the op kwargs (or — simplest — call
-        ``reduce_dimensions(test_features, reducer=fitted_reducer)`` outside
-        the pipeline). See ``integration_example.py`` for a worked example.
+        Each batch-level ``'reduce'`` op fits a *fresh* reducer on the supplied
+        images. To reuse the same projection across train/test splits, call
+        :func:`reduce_dimensions` directly with ``return_reducer=True`` on the
+        training features and apply the fitted ``reducer`` to the test split
+        (``reduce_dimensions(test_features, reducer=fitted_reducer)``). See
+        ``integration_example.py`` for a worked example.
     """
     # ---- Step 1: per-image segment ------------------------------------------
     # Build a temporary pipeline containing only the per-image ops so that we
@@ -313,14 +334,14 @@ def batch_process(
         # Degenerate but legal: pipeline only contains batch-level ops.
         processed = [img for img in images]
 
-    # Stack into a feature matrix. All per-image outputs must share a shape.
+    # Stack per-image outputs. All must share a shape: a 1D vector each (after
+    # 'vectorize') stacks to 2D; a 2D matrix each (no 'vectorize') stacks to 3D.
     features = np.array(processed)
 
     # ---- Step 2: batch-level segment ---------------------------------------
-    # Apply each batch-level op once to the whole matrix. For 'reduce', the
-    # input is expected to be 2D, which is what np.array(processed) gives us
-    # when each per-image output is a 1D vector (the common case after
-    # 'vectorize').
+    # Apply each batch-level op once to the whole stack. 'reduce' reads the
+    # stack rank according to its method: vector methods expect the 2D matrix,
+    # matrix methods expect the 3D image stack.
     for op_name, kwargs in batch_ops:
         operation = ImagePipeline.OPERATIONS[op_name]
         try:
