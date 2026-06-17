@@ -3,7 +3,7 @@ integration_example.py — manual end-to-end check of the feature-extraction and
 preprocessing-pipeline API.
 
 This is a runnable *demonstration / smoke-test* script (not a pytest target):
-it wires the public ``image_preprocessing`` API together the way real calling
+it wires the public ``preprocessing`` API together the way real calling
 code would — load a sample dataset, build a pipeline, extract features in
 batches, and (optionally) train and evaluate a classifier — so you can sanity
 -check the whole flow by eye with ``python integration_example.py``-style use.
@@ -19,10 +19,10 @@ import numpy as np
 from typing import Tuple, List
 
 # Import pipeline components.
-# The names below are re-exported by image_preprocessing.py for backward
-# compatibility; underneath they now live in the `preprocessing/` package
-# (transforms.py, vectorize.py, reduce.py, pipeline.py, io.py).
-from image_preprocessing import (
+# The names below form the public API of the `preprocessing` package; underneath
+# they live in its submodules (transforms.py, vectorize.py, reduce.py,
+# pipeline.py, io.py).
+from preprocessing import (
     ImagePipeline,
     batch_process,
 )

@@ -10,16 +10,17 @@ the result without affecting others.
 Usage::
 
     from prebuilt_pipelines import PrebuiltPipelines
-    from image_preprocessing import batch_process
+    from preprocessing import batch_process
 
     pipeline = PrebuiltPipelines.fast_pipeline()      # 64x64 grayscale -> 4096
     features = batch_process(images, pipeline)
 
-The pipelines are built only from the public ``image_preprocessing`` facade, so
-this module has no dependency on the internal ``preprocessing/`` layout.
+The pipelines are built only from the public ``preprocessing`` package API, so
+this module depends only on that stable surface, not the internal submodule
+layout.
 """
 
-from image_preprocessing import ImagePipeline
+from preprocessing import ImagePipeline
 
 
 class PrebuiltPipelines:

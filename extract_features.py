@@ -2,8 +2,8 @@
 Stream image arrays from URL metadata for memory-efficient ML pipelines.
 
 Loads image URLs from split metadata files under ``base_dir``, downloads each
-image, decodes it to a BGR NumPy array (OpenCV convention, matching
-``image_preprocessing.py``), and yields arrays one at a time.
+image, decodes it to a BGR NumPy array (OpenCV convention, matching the
+``preprocessing`` package), and yields arrays one at a time.
 
 Typical usage::
 

@@ -18,7 +18,7 @@ Coverage
 * The generator contract of ``get_feature_stream`` (yields decoded BGR arrays).
 * BGR colour-convention checks (synthetic, no network).
 * Feature-extraction integrity: a streamed image pushed through the
-  ``image_preprocessing`` pipeline yields a dense, finite, correctly-shaped
+  ``preprocessing`` pipeline yields a dense, finite, correctly-shaped
   feature vector (instruction 6 — assert shapes, dtypes, embedding integrity).
 """
 
@@ -42,7 +42,7 @@ from extract_features import (
     _validate_split,
     get_feature_stream,
 )
-from image_preprocessing import ImagePipeline, resize_image, to_grayscale
+from preprocessing import ImagePipeline, resize_image, to_grayscale
 
 
 # ===========================================================================
@@ -453,7 +453,7 @@ class TestBGRConvention:
 class TestFeatureExtractionIntegrity:
     """Streamed images must survive the preprocessing pipeline intact.
 
-    Bridges the streamer and the ``image_preprocessing`` pipeline: an image
+    Bridges the streamer and the ``preprocessing`` pipeline: an image
     pulled from the (mocked) download path is pushed through a real pipeline
     and the resulting feature vector is checked for shape, dtype and embedding
     integrity (instruction 6 — no NaN/Inf, correct width, expected range).

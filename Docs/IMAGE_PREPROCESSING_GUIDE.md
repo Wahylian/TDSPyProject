@@ -16,13 +16,12 @@ The image preprocessing layer provides a production-ready, modular pipeline serv
 
 ## File organization
 
-The implementation lives in a small `preprocessing/` package behind a single facade. Import **only** from `image_preprocessing` — the facade re-exports the whole public API from one stable path.
+The implementation lives in a small `preprocessing/` package. Import **only** from the `preprocessing` package — its `__init__.py` re-exports the whole public API from one stable path.
 
 ```
 TDSPyProject/
-├── image_preprocessing.py        # Facade — the single public import path
-└── preprocessing/                # Implementation package
-    ├── __init__.py               # Re-exports everything below
+└── preprocessing/                # Implementation package — the single public import path
+    ├── __init__.py               # Public API: re-exports everything below (see __all__)
     ├── transforms.py             # to_grayscale, resize_image, normalize_image, reduce_noise
     ├── vectorize.py              # vectorize_image (flat + VGG16) — optional step
     ├── reduce.py                 # reduce_dimensions (vector + matrix subgroups, + bypass)
@@ -30,14 +29,13 @@ TDSPyProject/
     └── io.py                     # load_image_from_{bytes,file,pil}
 ```
 
-Both import styles are supported:
+Import the public API from the package:
 
 ```python
-# Facade (preferred — one path to remember):
-from image_preprocessing import ImagePipeline, vectorize_image, batch_process
+# Public API (preferred — one path to remember):
+from preprocessing import ImagePipeline, vectorize_image, batch_process
 
-# Package-style (equivalent):
-from preprocessing import ImagePipeline, reduce_dimensions
+# A specific submodule can still be imported directly when needed:
 from preprocessing.transforms import to_grayscale
 ```
 
@@ -111,7 +109,7 @@ omit it to keep each image as a 2D/3D matrix for CNNs and ViTs.
 
 ```python
 import numpy as np
-from image_preprocessing import vectorize_image
+from preprocessing import vectorize_image
 
 image = np.random.randint(0, 256, (224, 224, 3), dtype=np.uint8)
 
@@ -132,7 +130,7 @@ print(vgg_features.shape)  # (25088,)
 For VGG16 pipelines, resize first and skip `normalize_image()` — VGG16 applies its own preprocessing:
 
 ```python
-from image_preprocessing import ImagePipeline
+from preprocessing import ImagePipeline
 
 vgg_pipeline = ImagePipeline([
     ('resize', {'target_size': (224, 224), 'preserve_aspect': False}),
@@ -155,7 +153,7 @@ Scales pixel intensities to improve model convergence.
 - `'histogram'`: Histogram equalization (grayscale only)
 
 ```python
-from image_preprocessing import normalize_image
+from preprocessing import normalize_image
 
 # MinMax normalization (0-1 range)
 normalized = normalize_image(image, method='minmax')
@@ -182,7 +180,7 @@ Resize with optional aspect ratio preservation and multiple interpolation method
 - `interpolation`: 'nearest', 'bilinear' (default), 'bicubic', 'lanczos'
 
 ```python
-from image_preprocessing import resize_image
+from preprocessing import resize_image
 
 # Resize to 64x64 with aspect ratio preservation
 resized = resize_image(image, (64, 64), preserve_aspect=True)
@@ -203,7 +201,7 @@ hq_resized = resize_image(image, (256, 256), interpolation='lanczos')
 Convert color images to single-channel grayscale.
 
 ```python
-from image_preprocessing import to_grayscale
+from preprocessing import to_grayscale
 
 # Convert RGB to grayscale
 gray = to_grayscale(image)
@@ -227,7 +225,7 @@ Multiple denoising techniques for different noise types.
 - `'median'`: Median filter (good for salt-and-pepper noise)
 
 ```python
-from image_preprocessing import reduce_noise
+from preprocessing import reduce_noise
 
 # Bilateral filtering (recommended)
 denoised = reduce_noise(image, method='bilateral', kernel_size=5)
@@ -298,7 +296,7 @@ same, and the terse aliases `'pca'` → `'vec-pca'`, `'jl'` /
 **Direct usage:**
 
 ```python
-from image_preprocessing import reduce_dimensions
+from preprocessing import reduce_dimensions
 import numpy as np
 
 # --- Vector subgroup: flat (n_samples, n_features) features ---
@@ -348,7 +346,7 @@ print(rgb_r.shape, rgb_test_r.shape)  # (200, 128, 32, 3) (50, 128, 32, 3)
 **Via `ImagePipeline` (the recommended end-to-end form):**
 
 ```python
-from image_preprocessing import ImagePipeline, batch_process
+from preprocessing import ImagePipeline, batch_process
 
 # Vector pipeline: vectorize, then reduce the flat vectors.
 vector_pipeline = ImagePipeline([
@@ -398,7 +396,7 @@ re-apply it to the test set** — never refit per split. The pattern is identica
 for both subgroups; only the method name and input shape differ:
 
 ```python
-from image_preprocessing import ImagePipeline, batch_process, reduce_dimensions
+from preprocessing import ImagePipeline, batch_process, reduce_dimensions
 
 # 1. Build a per-image-only sub-pipeline (drop the 'reduce' op).
 full = ImagePipeline([
@@ -431,7 +429,7 @@ X_test = reduce_dimensions(X_test_raw, reducer=reducer)
 Best when: You want to configure pipelines via config files or during runtime.
 
 ```python
-from image_preprocessing import ImagePipeline
+from preprocessing import ImagePipeline
 import numpy as np
 
 # Create pipeline
@@ -468,7 +466,7 @@ print(pipeline)
 Best when: You want explicit function composition without class overhead.
 
 ```python
-from image_preprocessing import compose, vectorize_image, normalize_image, resize_image, to_grayscale
+from preprocessing import compose, vectorize_image, normalize_image, resize_image, to_grayscale
 from functools import partial
 
 # Define partial functions
@@ -498,7 +496,7 @@ print(features.shape)  # (4096,)
 Best when: You want to wrap custom feature extraction functions.
 
 ```python
-from image_preprocessing import pipeline_decorator, to_grayscale, resize_image, vectorize_image
+from preprocessing import pipeline_decorator, to_grayscale, resize_image, vectorize_image
 from functools import partial
 
 @pipeline_decorator(
@@ -529,7 +527,7 @@ print(features.shape)  # (4096,)
 Add the pipeline to your feature extraction workflow:
 
 ```python
-from image_preprocessing import ImagePipeline
+from preprocessing import ImagePipeline
 import numpy as np
 
 # Define your standard preprocessing pipeline
@@ -554,7 +552,7 @@ for url, label in get_data_stream():
 ### 2. For Batch Processing
 
 ```python
-from image_preprocessing import batch_process, ImagePipeline
+from preprocessing import batch_process, ImagePipeline
 import numpy as np
 
 pipeline = ImagePipeline([...])
@@ -573,7 +571,7 @@ model.fit(features_batch, labels)
 ### 3. For SVM Training (Flat Features)
 
 ```python
-from image_preprocessing import ImagePipeline
+from preprocessing import ImagePipeline
 from sklearn.svm import SVC
 import numpy as np
 
@@ -602,7 +600,7 @@ predictions = svm.predict(test_features)
 ### 4. For SVM Training (VGG16 Embeddings)
 
 ```python
-from image_preprocessing import ImagePipeline, batch_process
+from preprocessing import ImagePipeline, batch_process
 from sklearn.svm import SVC
 from sklearn.preprocessing import StandardScaler
 import numpy as np
@@ -677,7 +675,7 @@ VGG16 is preferred when you have limited labeled data and want transferable visu
 
 ```python
 import time
-from image_preprocessing import ImagePipeline
+from preprocessing import ImagePipeline
 
 pipelines = {
     'fast': ImagePipeline([
@@ -708,7 +706,7 @@ for name, pipeline in pipelines.items():
 All functions include robust error handling:
 
 ```python
-from image_preprocessing import ImagePipeline, vectorize_image
+from preprocessing import ImagePipeline, vectorize_image
 
 # Type checking
 try:
@@ -738,7 +736,7 @@ except ValueError as e:
 Extend the pipeline with custom functions:
 
 ```python
-from image_preprocessing import ImagePipeline
+from preprocessing import ImagePipeline
 import numpy as np
 
 def custom_edge_detection(image: np.ndarray) -> np.ndarray:
@@ -811,7 +809,7 @@ batch-level split, and the composition patterns.
 For issues or customization needs, refer to the comprehensive docstrings in the module:
 
 ```python
-from image_preprocessing import ImagePipeline
+from preprocessing import ImagePipeline
 help(ImagePipeline)
 help(ImagePipeline.process)
 ```
@@ -819,11 +817,15 @@ help(ImagePipeline.process)
 ---
 
 **Version:** 1.4  
-**Last Updated:** 2026-06-12  
+**Last Updated:** 2026-06-17  
 **Production Ready:** ✅
 
 ### Changelog
 
+- **1.5 (2026-06-17)** — The `preprocessing/` package `__init__.py` is now the
+  single public API. The standalone `image_preprocessing.py` facade was removed;
+  `__all__` and all re-exports moved into the package, so callers import directly
+  from `preprocessing` (`from preprocessing import ImagePipeline, batch_process`).
 - **1.4 (2026-06-12)** — Matrix reduction (`'mat-pca'` / `'mat-jl'`) now accepts
   multi-channel (BGR/RGB) image stacks. A colour stack
   `(n_samples, height, width, channels)` reduces to

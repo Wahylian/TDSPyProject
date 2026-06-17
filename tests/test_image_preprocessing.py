@@ -1,9 +1,9 @@
 """
-Unit tests for the ``image_preprocessing`` facade and the submodules it exposes.
+Unit tests for the ``preprocessing`` package API and the submodules it exposes.
 
 Scope
 -----
-* Facade surface — every symbol promised by ``__all__`` is importable.
+* Public API surface — every symbol promised by ``__all__`` is importable.
 * The per-image transforms (grayscale / resize / normalize / denoise).
 * Vectorization (flat + a mocked VGG16 path).
 * Batch-level dimensionality reduction (None / PCA / Johnson–Lindenstrauss).
@@ -11,7 +11,7 @@ Scope
   ``batch_process``).
 * The I/O helpers.
 * A faithful migration of the ``__main__`` "example usage" demo that used to
-  live at the bottom of ``image_preprocessing.py`` (now ``test_example_usage_*``).
+  live at the bottom of the old facade module (now ``test_example_usage_*``).
 * Edge cases: missing files, corrupted bytes, degenerate dimensions, invalid
   arguments.
 
@@ -26,8 +26,8 @@ from functools import partial
 import numpy as np
 import pytest
 
-import image_preprocessing as ip
-from image_preprocessing import (
+import preprocessing as ip
+from preprocessing import (
     ImagePipeline,
     batch_process,
     compose,
@@ -44,20 +44,20 @@ from image_preprocessing import (
 
 
 # ===========================================================================
-# Facade surface
+# Public API surface
 # ===========================================================================
 
-class TestFacadeSurface:
-    """The facade must expose exactly its advertised public API."""
+class TestPublicApiSurface:
+    """The package must expose exactly its advertised public API."""
 
     def test_all_symbols_are_importable(self):
         """``__all__`` matches the expected set and every name actually resolves.
 
         Guards against two drifts at once: the advertised API changing
         unintentionally, and a name being listed in ``__all__`` without a
-        backing attribute (which would break ``from facade import *``).
+        backing attribute (which would break ``from preprocessing import *``).
         """
-        # Arrange: the 14 names the facade promises in __all__.
+        # Arrange: the 14 names the package promises in __all__.
         expected = {
             "to_grayscale", "resize_image", "normalize_image", "reduce_noise",
             "vectorize_image", "reduce_dimensions", "ImagePipeline",
@@ -69,7 +69,7 @@ class TestFacadeSurface:
         # Assert: surface matches and every name resolves to a real attribute.
         assert published == expected
         for name in expected:
-            assert hasattr(ip, name), f"facade missing advertised symbol {name!r}"
+            assert hasattr(ip, name), f"package missing advertised symbol {name!r}"
 
     def test_private_vgg_cache_alias_present_but_not_public(self):
         """The private VGG16 cache stays reachable but out of the public API.
@@ -1097,7 +1097,7 @@ class TestIOHelpers:
 
 
 # ===========================================================================
-# Migrated "__main__" example usage (was the demo in image_preprocessing.py)
+# Migrated "__main__" example usage (was the demo in the old facade module)
 # ===========================================================================
 
 class TestExampleUsageMigration:

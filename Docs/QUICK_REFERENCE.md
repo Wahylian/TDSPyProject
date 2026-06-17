@@ -7,7 +7,7 @@ pip install opencv-python scikit-image
 
 ## Quickstart (3 lines)
 ```python
-from image_preprocessing import ImagePipeline
+from preprocessing import ImagePipeline
 pipeline = ImagePipeline([('grayscale', {}), ('resize', {'target_size': (64, 64)}), ('normalize', {'method': 'minmax'}), ('vectorize', {})])
 features = pipeline.process(image)  # (4096,) float32 vector
 ```
@@ -28,7 +28,7 @@ features = pipeline.process(image)
 ### 2. Functional Composition
 ```python
 from functools import partial
-from image_preprocessing import compose
+from preprocessing import compose
 pipeline = compose(
     vectorize_image,
     partial(normalize_image, method='minmax'),
@@ -40,7 +40,7 @@ features = pipeline(image)
 
 ### 3. Decorator
 ```python
-from image_preprocessing import pipeline_decorator, to_grayscale, resize_image, vectorize_image
+from preprocessing import pipeline_decorator, to_grayscale, resize_image, vectorize_image
 
 @pipeline_decorator(
     (to_grayscale, {}),
@@ -57,7 +57,7 @@ features = extract_features(image)
 
 ### SVM Training Pipeline
 ```python
-from image_preprocessing import ImagePipeline
+from preprocessing import ImagePipeline
 from sklearn.svm import SVC
 
 # Preprocess
@@ -80,7 +80,7 @@ predictions = svm.predict(test_features)
 
 ### Batch Processing
 ```python
-from image_preprocessing import batch_process, ImagePipeline
+from preprocessing import batch_process, ImagePipeline
 
 pipeline = ImagePipeline([...])
 features_batch = batch_process(images_list, pipeline)
@@ -89,7 +89,7 @@ features_batch = batch_process(images_list, pipeline)
 
 ### Vector Reduction (classical models)
 ```python
-from image_preprocessing import batch_process, ImagePipeline
+from preprocessing import batch_process, ImagePipeline
 
 pipeline = ImagePipeline([
     ('grayscale', {}),
@@ -103,7 +103,7 @@ X = batch_process(images_list, pipeline)  # (num_images, 128)
 
 ### Matrix Reduction (CNN / ViT inputs)
 ```python
-from image_preprocessing import batch_process, ImagePipeline
+from preprocessing import batch_process, ImagePipeline
 
 # Grayscale matrices
 pipeline = ImagePipeline([
@@ -207,11 +207,11 @@ Input Size          Grayscale       RGB
 ### TypeError: Expected np.ndarray
 ```python
 # ❌ Wrong: passing PIL Image
-image_preprocessing.vectorize_image(pil_image)
+preprocessing.vectorize_image(pil_image)
 
 # ✅ Correct: convert to numpy array
 import numpy as np
-image_preprocessing.vectorize_image(np.array(pil_image))
+preprocessing.vectorize_image(np.array(pil_image))
 ```
 
 ### ValueError: Image must be 2D or 3D
@@ -311,8 +311,8 @@ print(f"Infs: {np.isinf(features).sum()}")
 
 ```
 TDSPyProject/
-├── image_preprocessing.py           # Facade — the single public import path
-├── preprocessing/                   # Implementation package
+├── preprocessing/                   # Implementation package — the single public import path
+│   ├── __init__.py                  # Public API: re-exports the whole surface (see __all__)
 │   ├── transforms.py                # grayscale / resize / normalize / denoise
 │   ├── vectorize.py                 # vectorize_image (optional step)
 │   ├── reduce.py                    # reduce_dimensions (vector + matrix)
@@ -330,7 +330,7 @@ TDSPyProject/
 ## Import Everything You Need
 
 ```python
-from image_preprocessing import (
+from preprocessing import (
     # Core functions
     vectorize_image,
     normalize_image,
@@ -378,11 +378,11 @@ mat_jl = PrebuiltPipelines.mat_jl_pipeline(64)           # -> (n, 128, 64)
 
 ```python
 # Function docstring
-from image_preprocessing import vectorize_image
+from preprocessing import vectorize_image
 help(vectorize_image)
 
 # Class methods
-from image_preprocessing import ImagePipeline
+from preprocessing import ImagePipeline
 help(ImagePipeline.process)
 
 # All available operations
