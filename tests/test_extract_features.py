@@ -39,6 +39,7 @@ from extract_features import (
     _load_image_urls,
     _url_column,
     _urls_from_csv,
+    _urls_from_json,
     _validate_split,
     get_feature_stream,
 )
@@ -216,6 +217,110 @@ class TestMetadataLoading:
         # Act + Assert
         with pytest.raises(ValueError):
             _urls_from_csv(str(bad), "train", filter_by_split=False)
+
+
+class TestJsonMetadataStructures:
+    """The JSON metadata reader accepts several documented layouts.
+
+    ``_urls_from_json`` supports a bare list, a dict keyed by split name, and a
+    dict carrying a generic ``"urls"`` key — and must reject anything else so a
+    malformed metadata file fails loudly rather than yielding nothing.
+    """
+
+    def test_dict_keyed_by_split_returns_that_splits_urls(self, tmp_path):
+        """A dict keyed by split name returns only the requested split's URLs."""
+        # Arrange: a JSON object with separate lists per split.
+        path = tmp_path / "split.json"
+        path.write_text(
+            '{"train": ["http://x/a.png"], "test": ["http://x/b.png"]}',
+            encoding="utf-8",
+        )
+        # Act
+        urls = _urls_from_json(str(path), "train")
+        # Assert: only the train list is returned.
+        assert urls == ["http://x/a.png"]
+
+    def test_dict_with_generic_urls_key_is_used(self, tmp_path):
+        """A dict with a generic ``"urls"`` key is read when the split is absent.
+
+        When the object has no per-split entry, the loader falls back to a
+        flat ``"urls"`` list rather than failing.
+        """
+        # Arrange: a JSON object exposing a single shared "urls" list.
+        path = tmp_path / "split.json"
+        path.write_text('{"urls": ["http://x/1.png", "http://x/2.png"]}', encoding="utf-8")
+        # Act
+        urls = _urls_from_json(str(path), "train")
+        # Assert
+        assert urls == ["http://x/1.png", "http://x/2.png"]
+
+    def test_unrecognized_structure_raises(self, tmp_path):
+        """A JSON shape that is neither list nor a known dict layout raises.
+
+        Edge case: a dict with no split entry and no ``"urls"`` key is
+        unusable, so the loader must raise instead of returning an empty result
+        that masquerades as "no images".
+        """
+        # Arrange: a dict carrying an unrelated key only.
+        path = tmp_path / "split.json"
+        path.write_text('{"something_else": [1, 2, 3]}', encoding="utf-8")
+        # Act + Assert
+        with pytest.raises(ValueError):
+            _urls_from_json(str(path), "train")
+
+
+class TestCsvMetadataVariants:
+    """CSV column detection and split-filtering edge cases."""
+
+    def test_per_split_csv_loads_all_rows_without_filtering(self, tmp_path):
+        """A per-split ``{split}.csv`` returns every row (no split column needed).
+
+        A dedicated per-split file already contains only that split's rows, so
+        the loader reads it with ``filter_by_split=False`` and keeps them all,
+        even though there is no ``data_split`` column to filter on.
+        """
+        # Arrange: a train.csv with only a URL column (no split column).
+        path = tmp_path / "train.csv"
+        path.write_text(
+            "image_url\nhttp://x/1.png\nhttp://x/2.png\n", encoding="utf-8"
+        )
+        # Act
+        urls = _load_image_urls("train", str(tmp_path))
+        # Assert: both rows are returned unfiltered.
+        assert urls == ["http://x/1.png", "http://x/2.png"]
+
+    def test_url_column_variant_is_detected_end_to_end(self, tmp_path):
+        """A combined CSV using the ``url`` column name still streams correctly.
+
+        The loader supports either ``image_url`` or ``url``; this exercises the
+        ``url`` spelling through the full combined-file path with split filtering.
+        """
+        # Arrange: a split_dataset.csv whose URL column is named "url".
+        path = tmp_path / "split_dataset.csv"
+        path.write_text(
+            "url,data_split\n"
+            "http://x/a.png,train\n"
+            "http://x/b.png,test\n",
+            encoding="utf-8",
+        )
+        # Act
+        train_urls = _load_image_urls("train", str(tmp_path))
+        # Assert: the "url" column was detected and split filtering applied.
+        assert train_urls == ["http://x/a.png"]
+
+    def test_filter_by_split_without_split_column_raises(self, tmp_path):
+        """Requesting split filtering on a CSV lacking a split column raises.
+
+        Edge case: a combined file must carry a ``data_split`` / ``split``
+        column to be filtered; without one the loader cannot honour the request
+        and must raise rather than silently returning every split's rows.
+        """
+        # Arrange: a CSV with a URL column but no split column.
+        path = tmp_path / "split.csv"
+        path.write_text("image_url\nhttp://x/1.png\n", encoding="utf-8")
+        # Act + Assert
+        with pytest.raises(ValueError):
+            _urls_from_csv(str(path), "train", filter_by_split=True)
 
 
 # ===========================================================================
