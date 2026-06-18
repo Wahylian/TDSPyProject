@@ -139,26 +139,29 @@ class TestCreateSplitLogic:
         assert set(df["data_split"]) == {"train", "val", "test"}
 
     def test_split_is_deterministic_for_fixed_seed(self, captured_split):
-        """The same seed produces an identical split assignment across runs.
+        """The same seed produces an identical shuffled ordering across runs.
 
         Reproducibility is the whole point of the seeded shuffle: two runs with
-        seed 42 must assign every row to the same split.
+        seed 42 must produce the same row order (and therefore the same
+        assignment). The split column itself is now positional, so determinism
+        is checked on the shuffled ``image_url`` order.
         """
         # Act: run the split twice with the same seed.
-        first = captured_split(seed=42)["data_split"].tolist()
-        second = captured_split(seed=42)["data_split"].tolist()
-        # Assert: identical assignments.
+        first = captured_split(seed=42)["image_url"].tolist()
+        second = captured_split(seed=42)["image_url"].tolist()
+        # Assert: identical row ordering.
         assert first == second
 
     def test_different_seeds_can_change_assignment(self, captured_split):
         """Different seeds generally yield a different shuffle.
 
         Confirms the seed actually drives the shuffle (not ignored): two
-        distinct seeds must not produce the identical assignment for a
-        reasonably sized dataset.
+        distinct seeds must not produce the identical row ordering for a
+        reasonably sized dataset. (The split column is positional now, so the
+        seed's effect shows up in the ``image_url`` ordering.)
         """
         # Act
-        first = captured_split(seed=1)["data_split"].tolist()
-        second = captured_split(seed=2)["data_split"].tolist()
-        # Assert: the seed influences the partitioning.
+        first = captured_split(seed=1)["image_url"].tolist()
+        second = captured_split(seed=2)["image_url"].tolist()
+        # Assert: the seed influences the shuffled ordering / partitioning.
         assert first != second
