@@ -25,6 +25,7 @@ Coverage
 from __future__ import annotations
 
 import io
+import random
 
 import cv2
 import numpy as np
@@ -87,6 +88,19 @@ def _write_split_csv(path, rows, header=("image_url", "data_split")):
     """Write a small split_dataset-style CSV to *path*."""
     lines = [",".join(header)]
     lines += [",".join(r) for r in rows]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _write_labeled_split_csv(path, n):
+    """Write a combined train CSV with *n* rows, each uniquely labeled ``0..n-1``.
+
+    The unique per-row label acts as a stable identity tag so a test can track
+    exactly where each datapoint ends up after the stream's shuffle (the mocked
+    download returns an identical image for every URL, so the label is the only
+    thing that distinguishes datapoints).
+    """
+    lines = ["image_url,label_numeric,data_split"]
+    lines += [f"http://example.com/{i}.png,{i},train" for i in range(n)]
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -496,14 +510,19 @@ class TestGeneratorContract:
             streamed_pairs: Pre-drained list of (image, label) pairs from the fixture.
         """
         # Assert: count matches the input URLs and every item is a valid
-        # 3-channel uint8 image paired with its label, in CSV order.
+        # 3-channel uint8 image paired with its label. Order is intentionally not
+        # asserted here — ``get_feature_stream`` randomizes ordering by default —
+        # so the labels are compared as an order-independent multiset. Ordering
+        # behaviour is covered explicitly in ``TestRandomizedOrdering``.
         assert len(streamed_pairs) == 3
-        for (img, label), expected_label in zip(streamed_pairs, ["0", "1", "0"]):
+        labels = []
+        for img, label in streamed_pairs:
             assert img.dtype == np.uint8
             assert img.ndim == 3 and img.shape[2] == 3
             assert 0 <= img.min() and img.max() <= 255
-            # The label stays aligned with the image yielded alongside it.
-            assert label == expected_label
+            labels.append(label)
+        # Every datapoint survives the shuffle: same labels, regardless of order.
+        assert sorted(labels) == ["0", "0", "1"]
 
     def test_broken_urls_are_skipped_not_yielded(self, tmp_path, monkeypatch):
         """A broken URL in the middle is dropped; the stream keeps going.
@@ -644,3 +663,104 @@ class TestFeatureExtractionIntegrity:
         # Assert: grayscale drops the channel axis; resize hits the exact target.
         assert gray.ndim == 2
         assert resized.shape == (64, 64, 3)
+
+
+# ===========================================================================
+# 8. Randomized ordering (random_seed)
+# ===========================================================================
+
+class TestRandomizedOrdering:
+    """``get_feature_stream`` randomizes datapoint order, reproducibly when seeded.
+
+    These tests pin the new ordering contract: by default the stream is shuffled
+    (so training is not biased by file order), a passed ``random_seed`` makes that
+    shuffle exactly reproducible, and — whatever the order — no datapoint is ever
+    dropped or duplicated. Identity is tracked via the unique per-row label
+    written by ``_write_labeled_split_csv`` (the mocked download returns the same
+    image bytes for every URL). All network access is mocked via
+    ``mock_download_ok``.
+    """
+
+    def test_same_seed_reproduces_order(self, tmp_path, mock_download_ok):
+        """The same ``random_seed`` yields the exact same ordering twice.
+
+        This is the core reproducibility guarantee the parameter exists for:
+        seeding lets tests (and debugging runs) replay an identical stream.
+        """
+        # Arrange: a 25-row train split, each row uniquely labeled.
+        _write_labeled_split_csv(tmp_path / "split_dataset.csv", 25)
+        # Act: drain the stream twice with the same seed, tracking label order.
+        first = [lbl for _, lbl in get_feature_stream("train", base_dir=str(tmp_path), random_seed=123)]
+        second = [lbl for _, lbl in get_feature_stream("train", base_dir=str(tmp_path), random_seed=123)]
+        # Assert: identical ordering across the two seeded runs.
+        assert first == second
+
+    def test_seeded_order_matches_explicit_shuffle(self, tmp_path, mock_download_ok):
+        """A seeded stream matches an independent shuffle of the loaded entries.
+
+        Confirms two things at once: the shuffle is the documented
+        ``random.Random(seed)`` permutation of the metadata (so its order is
+        predictable from the seed), and the result is a genuine permutation
+        rather than the original file order.
+        """
+        # Arrange
+        _write_labeled_split_csv(tmp_path / "split_dataset.csv", 25)
+        # Arrange: reproduce the expected ordering by applying the same seeded
+        # shuffle to an independently loaded copy of the entries.
+        expected = _load_image_entries("train", str(tmp_path))
+        random.Random(123).shuffle(expected)
+        expected_labels = [lbl for _, lbl in expected]
+        # Act
+        streamed_labels = [lbl for _, lbl in get_feature_stream("train", base_dir=str(tmp_path), random_seed=123)]
+        # Assert: stream order matches the explicit shuffle, and it really moved
+        # away from the source (0..24) order.
+        assert streamed_labels == expected_labels
+        assert streamed_labels != [str(i) for i in range(25)]
+
+    def test_no_datapoints_lost_or_duplicated(self, tmp_path, mock_download_ok):
+        """Shuffling reorders datapoints without dropping or duplicating any.
+
+        Edge case the randomization must never violate: a permutation preserves
+        the full multiset of datapoints — sorting the streamed labels must
+        recover exactly the original 0..n-1 set.
+        """
+        # Arrange
+        _write_labeled_split_csv(tmp_path / "split_dataset.csv", 25)
+        # Act
+        labels = [lbl for _, lbl in get_feature_stream("train", base_dir=str(tmp_path), random_seed=7)]
+        # Assert: same set of datapoints, just reordered.
+        assert sorted(labels, key=int) == [str(i) for i in range(25)]
+
+    def test_different_seeds_produce_different_orders(self, tmp_path, mock_download_ok):
+        """Different seeds generally yield different orderings.
+
+        Sanity check that the seed actually drives the permutation (a no-op
+        "shuffle" would make every seed identical). With 25 datapoints the odds
+        of two distinct seeds colliding are negligible.
+        """
+        # Arrange
+        _write_labeled_split_csv(tmp_path / "split_dataset.csv", 25)
+        # Act
+        a = [lbl for _, lbl in get_feature_stream("train", base_dir=str(tmp_path), random_seed=1)]
+        b = [lbl for _, lbl in get_feature_stream("train", base_dir=str(tmp_path), random_seed=2)]
+        # Assert
+        assert a != b
+
+    def test_does_not_perturb_global_rng(self, tmp_path, mock_download_ok):
+        """Seeding the stream leaves the global ``random`` state untouched.
+
+        The implementation uses a local ``random.Random`` instance, so a caller's
+        own global RNG sequence must be unaffected by streaming — important for
+        test isolation and for any other seeded randomness in a training run.
+        """
+        # Arrange
+        _write_labeled_split_csv(tmp_path / "split_dataset.csv", 10)
+        # Arrange: the global-RNG sequence we expect to see, captured before any stream call.
+        random.seed(999)
+        expected_after = [random.random() for _ in range(3)]
+        # Act: re-seed, drain a seeded stream, then resume drawing from the global RNG.
+        random.seed(999)
+        list(get_feature_stream("train", base_dir=str(tmp_path), random_seed=123))
+        actual_after = [random.random() for _ in range(3)]
+        # Assert: the stream's internal shuffle did not consume the global RNG.
+        assert actual_after == expected_after
