@@ -1,17 +1,16 @@
 """
 Create a deterministic train/val/test split (70/15/15) from the dataset.
 
-This script loads the dataset and creates a new split with a reproducible
-random seed, saving results to split_dataset.csv.
+This script loads the local-path dataset mapping and creates a new split with a
+reproducible random seed, saving results to split_dataset.csv.
 
 Usage:
     python create_split.py [--seed SEED]
-    
+
     Example:
         python create_split.py --seed 42
 """
 import os
-import glob
 import argparse
 import numpy as np
 import pandas as pd
@@ -20,28 +19,30 @@ import pandas as pd
 def create_train_val_test_split(seed: int = 42) -> None:
     """
     Reseparate the dataset into train/val/test split (70/15/15) with deterministic seed.
-    
-    Loads the dataset, creates a new deterministic split, and saves the results to
-    split_dataset.csv with columns: image_url, label_numeric, and data_split.
-    
+
+    Loads the local-path mapping (photos_dataset.csv), creates a new deterministic
+    split, and saves the results to split_dataset.csv with columns: image_path,
+    label_numeric, and data_split.
+
     Args:
         seed: Random seed for reproducibility (default: 42)
     """
-    # Load the original dataset (FINAL_DATASET.csv specifically)
+    # Load the local-path dataset mapping produced by download_photos.py
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    dataset_path = os.path.join(script_dir, "datasets", "**", "FINAL_DATASET.csv")
-    csv_files = glob.glob(dataset_path, recursive=True)
-    if not csv_files:
-        raise FileNotFoundError("FINAL_DATASET.csv not found — run downloaddataset.py first.")
-    
-    dataset_df = pd.read_csv(csv_files[0])
-    print(f"Loaded {len(dataset_df)} rows from {csv_files[0]}")
-    
-    # Extract only the columns we need
-    data = dataset_df[["image_url", "label_numeric"]].copy()
+    dataset_path = os.path.join(script_dir, "datasets", "photos_dataset.csv")
+    if not os.path.isfile(dataset_path):
+        raise FileNotFoundError("photos_dataset.csv not found — run download_photos.py first.")
+
+    dataset_df = pd.read_csv(dataset_path)
+    print(f"Loaded {len(dataset_df)} rows from {dataset_path}")
+
+    # Extract only the columns we need. Rows whose image could not be downloaded
+    # (empty image_path) carry no usable image, so they are dropped here along
+    # with any row missing a label.
+    data = dataset_df[["image_path", "label_numeric"]].copy()
     data = data.dropna()
-    
-    print(f"Using {len(data)} rows with valid image_url and label_numeric")
+
+    print(f"Using {len(data)} rows with a valid image_path and label_numeric")
     
     # Set random seed for reproducibility
     np.random.seed(seed)

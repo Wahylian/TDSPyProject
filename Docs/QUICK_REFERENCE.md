@@ -320,7 +320,9 @@ TDSPyProject/
 │   └── io.py                        # image loaders
 ├── prebuilt_pipelines.py            # Named ready-made pipelines
 ├── integration_example.py           # Data/feature/train/eval helpers
-├── extract_features.py              # URL-metadata image streamer
+├── download_photos.py               # Pre-downloads images to photos/ + writes datasets/photos_dataset.csv
+├── create_split.py                  # Builds datasets/split_dataset.csv (train/val/test) from the mapping
+├── extract_features.py              # Local-path image streamer (reads photos/ from split metadata)
 ├── tests/                           # pytest suite
 └── Docs/
     ├── IMAGE_PREPROCESSING_GUIDE.md # Full documentation

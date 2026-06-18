@@ -1,56 +1,59 @@
 """
 Tests for the dataset splitter in ``create_split.py``.
 
-``create_train_val_test_split`` loads ``FINAL_DATASET.csv`` and writes a
-deterministic 70/15/15 train/val/test split to ``split_dataset.csv``. These
-tests exercise its real splitting logic while keeping the filesystem isolated:
+``create_train_val_test_split`` loads ``photos_dataset.csv`` (the local-path
+mapping produced by ``download_photos.py``) and writes a deterministic 70/15/15
+train/val/test split to ``split_dataset.csv``. These tests exercise its real
+splitting logic while keeping the filesystem isolated:
 
-* ``glob.glob`` is monkeypatched so the loader reads a synthetic CSV from
-  ``tmp_path`` (or finds nothing, for the error case);
+* ``os.path.isfile`` and ``pandas.read_csv`` are monkeypatched so the loader
+  reads a synthetic in-memory frame (or reports the mapping as missing, for the
+  error case);
 * ``DataFrame.to_csv`` is monkeypatched to capture the result in memory instead
   of writing ``split_dataset.csv`` into the project tree.
 """
 
 from __future__ import annotations
 
+import numpy as np
+import pandas as pd
 import pytest
 
 import create_split as cs
 
 
-def _write_dataset_csv(path, n_valid: int = 20):
-    """Write a FINAL_DATASET-style CSV with ``n_valid`` rows plus 2 invalid ones.
+def _make_dataset_df(n_valid: int = 20) -> pd.DataFrame:
+    """Build a photos_dataset-style frame with ``n_valid`` fully-valid rows.
 
-    Includes an extra ``label_text`` column (to prove it is dropped) and two
-    rows with a missing ``label_numeric`` / ``image_url`` (to exercise dropna).
-
-    Returns:
-        int: the number of rows that survive ``dropna`` (i.e. ``n_valid``).
+    Adds an extra ``label_text`` column (to prove it is dropped), one row missing
+    its ``label_numeric`` and one row missing its ``image_path`` (a failed
+    download) — both of which must be dropped before splitting.
     """
-    lines = ["image_url,label_numeric,label_text"]
-    for i in range(n_valid):
-        lines.append(f"http://example.com/{i}.jpg,{i % 2},cat{i % 2}")
-    # Two invalid rows: one missing the label, one missing the URL.
-    lines.append("http://example.com/missing_label.jpg,,cat")
-    lines.append(",1,dog")
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    return n_valid
+    rows = [
+        {"image_path": f"photos/{i}.jpg", "label_numeric": i % 2, "label_text": f"cat{i % 2}"}
+        for i in range(n_valid)
+    ]
+    # One row with no label and one row with no path: both dropped.
+    rows.append({"image_path": "photos/nolabel.jpg", "label_numeric": np.nan, "label_text": "cat"})
+    rows.append({"image_path": np.nan, "label_numeric": 1, "label_text": "dog"})
+    return pd.DataFrame(rows)
 
 
 @pytest.fixture
-def captured_split(monkeypatch, tmp_path):
-    """Run the splitter against a synthetic CSV and capture the written DataFrame.
+def captured_split(monkeypatch):
+    """Run the splitter against a synthetic mapping and capture the written DataFrame.
 
-    Points ``glob.glob`` at a fabricated ``FINAL_DATASET.csv`` and replaces
-    ``DataFrame.to_csv`` with a capturing stub, so calling the splitter never
-    writes into the repository. Returns a callable that runs the split for a
-    given seed and hands back the captured output DataFrame.
+    Reports the mapping file as present, feeds the splitter a fabricated frame in
+    place of ``photos_dataset.csv``, and replaces ``DataFrame.to_csv`` with a
+    capturing stub, so calling the splitter never touches the repository. Returns
+    a callable that runs the split for a given seed and hands back the captured
+    output DataFrame.
     """
-    csv_path = tmp_path / "FINAL_DATASET.csv"
-    n_valid = _write_dataset_csv(csv_path)
+    n_valid = 20
+    source_df = _make_dataset_df(n_valid)
 
-    # The loader resolves the dataset via glob; point it at our temp file.
-    monkeypatch.setattr(cs.glob, "glob", lambda *a, **k: [str(csv_path)])
+    monkeypatch.setattr(cs.os.path, "isfile", lambda *a, **k: True)
+    monkeypatch.setattr(cs.pd, "read_csv", lambda *a, **k: source_df.copy())
 
     captured = {}
 
@@ -65,22 +68,23 @@ def captured_split(monkeypatch, tmp_path):
         cs.create_train_val_test_split(seed=seed)
         return captured["df"]
 
-    run.n_valid = n_valid
+    # Both the label-less row and the path-less row are dropped.
+    run.n_surviving = n_valid
     return run
 
 
 class TestCreateSplitErrors:
     """Failure modes of dataset resolution."""
 
-    def test_missing_dataset_raises_filenotfound(self, monkeypatch):
-        """A missing ``FINAL_DATASET.csv`` raises ``FileNotFoundError``.
+    def test_missing_mapping_raises_filenotfound(self, monkeypatch):
+        """A missing ``photos_dataset.csv`` raises ``FileNotFoundError``.
 
-        Edge case: with no dataset on disk the glob returns nothing, so the
-        splitter must fail loudly (pointing the user at ``downloaddataset.py``)
-        rather than proceeding on empty data.
+        Edge case: with no mapping on disk the splitter must fail loudly
+        (pointing the user at ``download_photos.py``) rather than proceeding on
+        empty data.
         """
-        # Arrange: glob finds no dataset file.
-        monkeypatch.setattr(cs.glob, "glob", lambda *a, **k: [])
+        # Arrange: the mapping file is reported as absent.
+        monkeypatch.setattr(cs.os.path, "isfile", lambda *a, **k: False)
         # Act + Assert
         with pytest.raises(FileNotFoundError):
             cs.create_train_val_test_split(seed=42)
@@ -90,7 +94,7 @@ class TestCreateSplitLogic:
     """The split proportions, column selection, row cleaning and determinism."""
 
     def test_output_has_only_expected_columns(self, captured_split):
-        """The written frame keeps exactly image_url, label_numeric, data_split.
+        """The written frame keeps exactly image_path, label_numeric, data_split.
 
         The extra ``label_text`` column in the source must be dropped — only the
         two needed columns plus the assigned split are persisted.
@@ -98,18 +102,20 @@ class TestCreateSplitLogic:
         # Act
         df = captured_split()
         # Assert
-        assert list(df.columns) == ["image_url", "label_numeric", "data_split"]
+        assert list(df.columns) == ["image_path", "label_numeric", "data_split"]
 
-    def test_invalid_rows_are_dropped(self, captured_split):
-        """Rows missing a URL or label are removed before splitting.
+    def test_missing_label_or_path_rows_are_dropped(self, captured_split):
+        """Rows missing a label or a path are removed before splitting.
 
-        Edge case: the two malformed source rows must not reach the output, so
-        the row count equals the number of valid rows only.
+        Both the label-less row and the failed-download row (empty
+        ``image_path``) must be dropped, so only the fully-valid rows survive and
+        no surviving row has an empty path.
         """
         # Act
         df = captured_split()
-        # Assert: only the valid rows survive dropna.
-        assert len(df) == captured_split.n_valid
+        # Assert: only the valid rows survive, none with a missing path.
+        assert len(df) == captured_split.n_surviving
+        assert df["image_path"].isna().sum() == 0
 
     def test_split_proportions_are_70_15_15(self, captured_split):
         """The split sizes follow the documented 70/15/15 partition.
@@ -119,7 +125,7 @@ class TestCreateSplitLogic:
         """
         # Act
         df = captured_split()
-        n = captured_split.n_valid
+        n = captured_split.n_surviving
         counts = df["data_split"].value_counts().to_dict()
         # Assert: each partition has its expected size and they sum to n.
         assert counts.get("train") == int(0.70 * n)

@@ -83,7 +83,7 @@ These columns survived the audit with no direct correlation to the label. They w
 
 | Column | Type | Notes |
 |---|---|---|
-| `image_url` | String | The primary input — the actual image is fetched from this URL |
+| `image_url` | String | The primary input — pre-downloaded once to local storage by `download_photos.py`, after which models read the image from its local path (see Section 5) |
 | `confidence_score` | Float [0.8, 0.99] | FAKE mean 0.89, REAL mean 0.92 — distributions overlap, not a giveaway |
 | `gender` | Categorical | Unknown / Female / Male — no correlation with label |
 | `age_group` | Categorical | 18–25 / 26–35 / 36–50 / 50+ — balanced across classes |
@@ -122,7 +122,9 @@ With only ~4,500 training images this augmentation is important for deep models 
 
 ## 5. Existing Codebase
 
-Two scripts have already been written as the foundation of the data pipeline.
+The data pipeline runs in four ordered stages, each a standalone script. Images
+are downloaded **once** to local storage up front, so model training reads them
+from disk rather than re-fetching every image from its URL on every run.
 
 ### `downloaddataset.py`
 
@@ -136,31 +138,51 @@ path = kagglehub.dataset_download("chuneeb/deepfake-detection-dataset-2026")
 
 This ensures the CSV lands at `datasets/chuneeb/deepfake-detection-dataset-2026/versions/1/FINAL_DATASET.csv`.
 
-### `extractfeatures.py`
+### `download_photos.py`
 
-A more substantial script that implements a streaming data pipeline combining image fetching with network traffic capture. Key design decisions already made:
+Pre-downloads every image to local storage. It reads `FINAL_DATASET.csv`,
+downloads each image referenced by `image_url` into a local `photos/` directory
+(named by the row's `image_id`, e.g. `photos/1.jpg`), and writes a new dataset
+mapping `datasets/photos_dataset.csv` with two columns:
 
-- **Generator-based (`get_data_stream`):** Yields one record at a time rather than loading all 6,557 images into memory — important given the dataset is fetched from URLs rather than stored locally.
-- **NFStream integration:** Captures live network flows (TCP/UDP statistics, packet timing, byte counts) in a background thread while images are being downloaded. These flow features are merged into each record and could serve as an additional feature modality.
-- **`preprocess_image` placeholder:** The function currently returns raw bytes unchanged. This is the hook where image resizing, normalisation, and augmentation will be implemented (see Section 4 for the planned implementation).
-- **IP-based flow matching:** Flows are matched to download records by destination IP, with hostnames pre-resolved before the download loop starts.
+| Column | Description |
+|---|---|
+| `image_path` | Local path to the downloaded image (e.g. `photos/1.jpg`), or empty if the download failed |
+| `label_numeric` | The numeric label carried over from `FINAL_DATASET.csv` |
 
-**Note on NFStream:** Running this script requires either Administrator privileges (Windows + Npcap) or root/`CAP_NET_RAW` (Linux). The `INTERFACE` constant (`"Wi-Fi"` by default) must match the active network adapter.
+Images already present on disk are reused, so the script is safe to re-run. An
+image that cannot be downloaded **keeps its datapoint** — its `image_path` is
+left empty rather than dropped — so the mapping has one row per row of
+`FINAL_DATASET.csv`. Running this once removes URL fetching from the training
+loop entirely.
 
-The overall record structure yielded per image:
+### `create_split.py`
 
-```python
-{
-    "url": str,
-    "label": str,           # "REAL" or "FAKE"
-    "dst_ip": str,
-    "http_status": int,
-    "content_length_bytes": int,
-    "response_time_s": float,
-    "image_data": np.ndarray,   # after preprocess_image is implemented
-    "flow_features": dict,      # NFStream flow statistics, or None
-}
-```
+Builds a deterministic 70/15/15 train/val/test split from the local-path mapping.
+It loads `datasets/photos_dataset.csv`, keeps `image_path` and `label_numeric`,
+drops rows missing a label or a path (a failed download carries no usable image),
+shuffles with a fixed seed, and writes `datasets/split_dataset.csv` with columns
+`image_path`, `label_numeric`, and `data_split`.
+
+### `extract_features.py`
+
+A streaming data loader that yields one `(image, label)` pair at a time so the
+full set of images is never held in memory at once. Key design points:
+
+- **Generator-based (`get_feature_stream`):** Resolves the split's metadata
+  (`split_dataset.csv`), reads each image **from its local path**, decodes it to
+  a BGR NumPy array (OpenCV convention, matching the `preprocessing` package),
+  and yields it with its label.
+- **Randomized order:** The lightweight `(path, label)` list is shuffled up front
+  (seeded for reproducibility) so the stream is not biased by file order; only
+  the cheap path/label strings are held in memory.
+- **Resilient:** A path that is missing or undecodable is skipped (with a
+  warning) rather than aborting the stream — the same way an empty path from a
+  failed download is skipped.
+
+Each item yielded is a `(np.ndarray, label)` pair, where the array is a decoded
+BGR image of shape `(height, width, 3)` and dtype `uint8`, ready to feed into the
+`preprocessing` pipeline (Section 4).
 
 ---
 
