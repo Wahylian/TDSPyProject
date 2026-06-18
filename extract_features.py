@@ -1,14 +1,19 @@
 """
 Stream image arrays from URL metadata for memory-efficient ML pipelines.
 
-Loads image URLs from split metadata files under ``base_dir``, downloads each
-image, decodes it to a BGR NumPy array (OpenCV convention, matching the
-``preprocessing`` package), and yields arrays one at a time.
+Loads image URLs (and their labels, when present) from split metadata files
+under ``base_dir``, downloads each image, decodes it to a BGR NumPy array
+(OpenCV convention, matching the ``preprocessing`` package), and yields
+``(image, label)`` pairs one at a time for supervised learning.
+
+Labels come from a ``label_numeric`` (preferred) or ``label`` column in CSV
+metadata. JSON metadata and CSVs without such a column yield ``label=None``.
 
 Typical usage::
 
-    for image in get_feature_stream("train", base_dir="./datasets"):
+    for image, label in get_feature_stream("train", base_dir="./datasets"):
         features = pipeline.process(image)
+        # train downstream on (features, label)
 
 Metadata lookup (first match wins)::
 
@@ -27,7 +32,7 @@ import json
 import os
 import warnings
 from io import BytesIO
-from typing import Generator, List
+from typing import Generator, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -38,6 +43,13 @@ VALID_SPLITS = frozenset({"train", "test", "val"})
 REQUEST_TIMEOUT = 10
 URL_COLUMNS = ("image_url", "url")
 SPLIT_COLUMNS = ("data_split", "split")
+LABEL_COLUMNS = ("label_numeric", "label")
+
+# A single metadata entry: an image URL paired with its label. The label is the
+# raw value from the metadata's label column, or ``None`` when the metadata
+# carries no label (JSON files, or CSVs without a label column).
+Label = Optional[str]
+Entry = Tuple[str, Label]
 
 
 def _validate_split(split: str) -> None:
@@ -47,18 +59,23 @@ def _validate_split(split: str) -> None:
         )
 
 
-def _urls_from_json(path: str, split: str) -> List[str]:
+def _entries_from_json(path: str, split: str) -> List[Entry]:
+    """Load ``(url, label)`` entries from JSON metadata.
+
+    JSON metadata carries only URLs, so every entry is unlabeled
+    (``label=None``).
+    """
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
 
     if isinstance(data, list):
-        return [str(url) for url in data]
+        return [(str(url), None) for url in data]
 
     if isinstance(data, dict):
         if split in data:
-            return [str(url) for url in data[split]]
+            return [(str(url), None) for url in data[split]]
         if "urls" in data:
-            return [str(url) for url in data["urls"]]
+            return [(str(url), None) for url in data["urls"]]
 
     raise ValueError(f"Unrecognized JSON structure in {path}")
 
@@ -79,8 +96,15 @@ def _split_column(fieldnames: List[str]) -> str | None:
     return None
 
 
-def _urls_from_csv(path: str, split: str, filter_by_split: bool) -> List[str]:
-    urls: List[str] = []
+def _label_column(fieldnames: List[str]) -> str | None:
+    for column in LABEL_COLUMNS:
+        if column in fieldnames:
+            return column
+    return None
+
+
+def _entries_from_csv(path: str, split: str, filter_by_split: bool) -> List[Entry]:
+    entries: List[Entry] = []
 
     with open(path, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
@@ -88,6 +112,7 @@ def _urls_from_csv(path: str, split: str, filter_by_split: bool) -> List[str]:
             raise ValueError(f"CSV file is empty: {path}")
 
         url_col = _url_column(reader.fieldnames)
+        label_col = _label_column(reader.fieldnames)
         split_col = _split_column(reader.fieldnames) if filter_by_split else None
 
         if filter_by_split and split_col is None:
@@ -100,14 +125,18 @@ def _urls_from_csv(path: str, split: str, filter_by_split: bool) -> List[str]:
             if filter_by_split and row.get(split_col) != split:
                 continue
             url = row.get(url_col, "").strip()
-            if url:
-                urls.append(url)
+            if not url:
+                continue
+            # Read the label from the same row so it stays aligned with its URL.
+            # Missing column or empty cell -> None (unlabeled).
+            label = row.get(label_col, "").strip() if label_col else None
+            entries.append((url, label or None))
 
-    return urls
+    return entries
 
 
-def _load_image_urls(split: str, base_dir: str) -> List[str]:
-    """Resolve and load image URLs for the requested split from metadata files."""
+def _load_image_entries(split: str, base_dir: str) -> List[Entry]:
+    """Resolve and load ``(url, label)`` entries for the requested split from metadata files."""
     _validate_split(split)
 
     if not os.path.isdir(base_dir):
@@ -126,8 +155,8 @@ def _load_image_urls(split: str, base_dir: str) -> List[str]:
             continue
 
         if fmt == "json":
-            return _urls_from_json(path, split)
-        return _urls_from_csv(path, split, filter_by_split=filter_by_split)
+            return _entries_from_json(path, split)
+        return _entries_from_csv(path, split, filter_by_split=filter_by_split)
 
     raise FileNotFoundError(
         f"No metadata file found for split '{split}' in {base_dir}. "
@@ -154,32 +183,36 @@ def _download_image(url: str) -> np.ndarray | None:
 def get_feature_stream(
     split: str,
     base_dir: str = "./data",
-) -> Generator[np.ndarray, None, None]:
+) -> Generator[Tuple[np.ndarray, Label], None, None]:
     """
-    Yield BGR image arrays for every downloadable URL in a dataset split.
+    Yield ``(image, label)`` pairs for every downloadable URL in a dataset split.
 
     Args:
         split: Dataset partition to load. Must be ``"train"``, ``"test"``, or ``"val"``.
         base_dir: Directory containing split metadata files. Defaults to ``"./data"``.
 
     Yields:
-        np.ndarray: Decoded image in BGR format (OpenCV convention) with shape
-        ``(height, width, 3)`` and dtype ``uint8``.
+        Tuple[np.ndarray, Label]: A pair of
+        ``(image, label)`` where ``image`` is the decoded picture in BGR format
+        (OpenCV convention) with shape ``(height, width, 3)`` and dtype
+        ``uint8``, and ``label`` is the raw label value from the metadata
+        (e.g. from ``label_numeric``) or ``None`` when the metadata is unlabeled.
+        The label always corresponds to the image yielded alongside it.
 
     Raises:
         ValueError: If ``split`` is not a recognized partition name.
         FileNotFoundError: If ``base_dir`` or the required metadata file is missing.
 
     Example:
-        >>> for image in get_feature_stream("train", base_dir="./datasets"):
-        ...     print(image.shape)
+        >>> for image, label in get_feature_stream("train", base_dir="./datasets"):
+        ...     print(image.shape, label)
     """
-    urls = _load_image_urls(split, base_dir)
+    entries = _load_image_entries(split, base_dir)
 
-    for url in urls:
+    for url, label in entries:
         image = _download_image(url)
         if image is not None:
-            yield image
+            yield image, label
 
 
 if __name__ == "__main__":
@@ -190,9 +223,9 @@ if __name__ == "__main__":
 
     print(f"Streaming '{split_name}' images from {data_dir}...")
     count = 0
-    for img in get_feature_stream(split_name, base_dir=data_dir):
+    for img, label in get_feature_stream(split_name, base_dir=data_dir):
         count += 1
-        print(f"  [{count}] shape={img.shape}, dtype={img.dtype}")
+        print(f"  [{count}] shape={img.shape}, dtype={img.dtype}, label={label}")
         if count >= 3:
             print("  (stopping after 3 images)")
             break

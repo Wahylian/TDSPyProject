@@ -36,10 +36,10 @@ from extract_features import (
     REQUEST_TIMEOUT,
     VALID_SPLITS,
     _download_image,
-    _load_image_urls,
+    _entries_from_csv,
+    _entries_from_json,
+    _load_image_entries,
     _url_column,
-    _urls_from_csv,
-    _urls_from_json,
     _validate_split,
     get_feature_stream,
 )
@@ -158,7 +158,8 @@ class TestMetadataLoading:
 
         Validates that the loader keys off the ``data_split`` column rather
         than returning every row, so callers asking for "train" never leak
-        "test" URLs into their stream.
+        "test" URLs into their stream. With no label column the entries carry
+        ``label=None``.
         """
         # Arrange: a combined split_dataset.csv with rows for two splits.
         csv_path = tmp_path / "split_dataset.csv"
@@ -171,11 +172,41 @@ class TestMetadataLoading:
             ],
         )
         # Act: load each split independently from the same combined file.
-        train_urls = _load_image_urls("train", str(tmp_path))
-        test_urls = _load_image_urls("test", str(tmp_path))
-        # Assert: split filtering keeps only the matching rows.
-        assert train_urls == ["http://example.com/a.jpg", "http://example.com/b.jpg"]
-        assert test_urls == ["http://example.com/c.jpg"]
+        train_entries = _load_image_entries("train", str(tmp_path))
+        test_entries = _load_image_entries("test", str(tmp_path))
+        # Assert: split filtering keeps only the matching rows; no label column
+        # means every entry is unlabeled.
+        assert train_entries == [
+            ("http://example.com/a.jpg", None),
+            ("http://example.com/b.jpg", None),
+        ]
+        assert test_entries == [("http://example.com/c.jpg", None)]
+
+    def test_loads_url_label_pairs_from_combined_csv(self, tmp_path):
+        """A combined CSV with a ``label_numeric`` column yields aligned labels.
+
+        This is the core supervised-learning guarantee: each URL is paired with
+        the label from its own row, and split filtering keeps that pairing
+        intact (the "test"-only row never bleeds into the train entries).
+        """
+        # Arrange: a combined CSV carrying labels, with rows for two splits.
+        csv_path = tmp_path / "split_dataset.csv"
+        csv_path.write_text(
+            "image_url,label_numeric,data_split\n"
+            "http://example.com/a.jpg,0,train\n"
+            "http://example.com/b.jpg,1,train\n"
+            "http://example.com/c.jpg,1,test\n",
+            encoding="utf-8",
+        )
+        # Act
+        train_entries = _load_image_entries("train", str(tmp_path))
+        test_entries = _load_image_entries("test", str(tmp_path))
+        # Assert: labels stay aligned with their URLs after split filtering.
+        assert train_entries == [
+            ("http://example.com/a.jpg", "0"),
+            ("http://example.com/b.jpg", "1"),
+        ]
+        assert test_entries == [("http://example.com/c.jpg", "1")]
 
     def test_loads_urls_from_per_split_json(self, tmp_path):
         """A per-split ``{split}.json`` file is loaded verbatim.
@@ -189,9 +220,9 @@ class TestMetadataLoading:
             '["http://x/1.png", "http://x/2.png"]', encoding="utf-8"
         )
         # Act
-        urls = _load_image_urls("train", str(tmp_path))
-        # Assert: the list is returned unchanged and in order.
-        assert urls == ["http://x/1.png", "http://x/2.png"]
+        entries = _load_image_entries("train", str(tmp_path))
+        # Assert: URLs are returned unchanged and in order; JSON has no labels.
+        assert entries == [("http://x/1.png", None), ("http://x/2.png", None)]
 
     def test_url_column_detection(self):
         """The URL column is auto-detected from a header row.
@@ -216,13 +247,13 @@ class TestMetadataLoading:
         bad.write_text("foo,bar\n1,2\n", encoding="utf-8")
         # Act + Assert
         with pytest.raises(ValueError):
-            _urls_from_csv(str(bad), "train", filter_by_split=False)
+            _entries_from_csv(str(bad), "train", filter_by_split=False)
 
 
 class TestJsonMetadataStructures:
     """The JSON metadata reader accepts several documented layouts.
 
-    ``_urls_from_json`` supports a bare list, a dict keyed by split name, and a
+    ``_entries_from_json`` supports a bare list, a dict keyed by split name, and a
     dict carrying a generic ``"urls"`` key — and must reject anything else so a
     malformed metadata file fails loudly rather than yielding nothing.
     """
@@ -236,9 +267,9 @@ class TestJsonMetadataStructures:
             encoding="utf-8",
         )
         # Act
-        urls = _urls_from_json(str(path), "train")
-        # Assert: only the train list is returned.
-        assert urls == ["http://x/a.png"]
+        entries = _entries_from_json(str(path), "train")
+        # Assert: only the train list is returned; JSON entries are unlabeled.
+        assert entries == [("http://x/a.png", None)]
 
     def test_dict_with_generic_urls_key_is_used(self, tmp_path):
         """A dict with a generic ``"urls"`` key is read when the split is absent.
@@ -250,9 +281,9 @@ class TestJsonMetadataStructures:
         path = tmp_path / "split.json"
         path.write_text('{"urls": ["http://x/1.png", "http://x/2.png"]}', encoding="utf-8")
         # Act
-        urls = _urls_from_json(str(path), "train")
+        entries = _entries_from_json(str(path), "train")
         # Assert
-        assert urls == ["http://x/1.png", "http://x/2.png"]
+        assert entries == [("http://x/1.png", None), ("http://x/2.png", None)]
 
     def test_unrecognized_structure_raises(self, tmp_path):
         """A JSON shape that is neither list nor a known dict layout raises.
@@ -266,7 +297,7 @@ class TestJsonMetadataStructures:
         path.write_text('{"something_else": [1, 2, 3]}', encoding="utf-8")
         # Act + Assert
         with pytest.raises(ValueError):
-            _urls_from_json(str(path), "train")
+            _entries_from_json(str(path), "train")
 
 
 class TestCsvMetadataVariants:
@@ -285,9 +316,9 @@ class TestCsvMetadataVariants:
             "image_url\nhttp://x/1.png\nhttp://x/2.png\n", encoding="utf-8"
         )
         # Act
-        urls = _load_image_urls("train", str(tmp_path))
-        # Assert: both rows are returned unfiltered.
-        assert urls == ["http://x/1.png", "http://x/2.png"]
+        entries = _load_image_entries("train", str(tmp_path))
+        # Assert: both rows are returned unfiltered; no label column -> None.
+        assert entries == [("http://x/1.png", None), ("http://x/2.png", None)]
 
     def test_url_column_variant_is_detected_end_to_end(self, tmp_path):
         """A combined CSV using the ``url`` column name still streams correctly.
@@ -304,9 +335,9 @@ class TestCsvMetadataVariants:
             encoding="utf-8",
         )
         # Act
-        train_urls = _load_image_urls("train", str(tmp_path))
+        train_entries = _load_image_entries("train", str(tmp_path))
         # Assert: the "url" column was detected and split filtering applied.
-        assert train_urls == ["http://x/a.png"]
+        assert train_entries == [("http://x/a.png", None)]
 
     def test_filter_by_split_without_split_column_raises(self, tmp_path):
         """Requesting split filtering on a CSV lacking a split column raises.
@@ -320,7 +351,7 @@ class TestCsvMetadataVariants:
         path.write_text("image_url\nhttp://x/1.png\n", encoding="utf-8")
         # Act + Assert
         with pytest.raises(ValueError):
-            _urls_from_csv(str(path), "train", filter_by_split=True)
+            _entries_from_csv(str(path), "train", filter_by_split=True)
 
 
 # ===========================================================================
@@ -343,7 +374,7 @@ class TestErrorHandling:
         """
         # Act + Assert
         with pytest.raises(FileNotFoundError):
-            _load_image_urls("train", "./nonexistent_directory_xyz")
+            _load_image_entries("train", "./nonexistent_directory_xyz")
 
     def test_empty_dir_raises_filenotfound(self, tmp_path):
         """An existing-but-empty directory still raises ``FileNotFoundError``.
@@ -354,7 +385,7 @@ class TestErrorHandling:
         """
         # Act + Assert
         with pytest.raises(FileNotFoundError):
-            _load_image_urls("train", str(tmp_path))
+            _load_image_entries("train", str(tmp_path))
 
 
 # ===========================================================================
@@ -432,39 +463,47 @@ class TestGeneratorContract:
     """
 
     @pytest.fixture
-    def streamed_images(self, tmp_path, mock_download_ok):
+    def streamed_pairs(self, tmp_path, mock_download_ok):
         """Materialise the full stream for a 3-URL, all-mocked train split.
 
-        Arranges a combined CSV with three train URLs and eagerly drains the
-        generator into a list so individual tests can assert on the results.
+        Arranges a combined CSV with three labelled train URLs and eagerly
+        drains the generator into a list so individual tests can assert on the
+        results.
 
         Args:
             tmp_path: Pytest temp directory holding the fabricated CSV.
             mock_download_ok: Stubs every download to return a valid PNG.
 
         Returns:
-            list[np.ndarray]: The decoded images produced by the stream.
+            list[tuple[np.ndarray, str]]: The (image, label) pairs produced by
+            the stream.
         """
-        # Arrange a 3-URL train split; every download is mocked to succeed.
-        _write_split_csv(
-            tmp_path / "split_dataset.csv",
-            rows=[(f"http://example.com/{i}.png", "train") for i in range(3)],
+        # Arrange a 3-URL train split with alternating labels; every download is
+        # mocked to succeed.
+        (tmp_path / "split_dataset.csv").write_text(
+            "image_url,label_numeric,data_split\n"
+            + "".join(
+                f"http://example.com/{i}.png,{i % 2},train\n" for i in range(3)
+            ),
+            encoding="utf-8",
         )
         return list(get_feature_stream("train", base_dir=str(tmp_path)))
 
-    def test_yields_decoded_bgr_images(self, streamed_images):
-        """The stream yields one well-formed BGR image per (good) URL.
+    def test_yields_decoded_bgr_images(self, streamed_pairs):
+        """The stream yields one well-formed (BGR image, label) pair per good URL.
 
         Args:
-            streamed_images: Pre-drained list of images from the fixture.
+            streamed_pairs: Pre-drained list of (image, label) pairs from the fixture.
         """
         # Assert: count matches the input URLs and every item is a valid
-        # 3-channel uint8 image with in-range pixel values.
-        assert len(streamed_images) == 3
-        for img in streamed_images:
+        # 3-channel uint8 image paired with its label, in CSV order.
+        assert len(streamed_pairs) == 3
+        for (img, label), expected_label in zip(streamed_pairs, ["0", "1", "0"]):
             assert img.dtype == np.uint8
             assert img.ndim == 3 and img.shape[2] == 3
             assert 0 <= img.min() and img.max() <= 255
+            # The label stays aligned with the image yielded alongside it.
+            assert label == expected_label
 
     def test_broken_urls_are_skipped_not_yielded(self, tmp_path, monkeypatch):
         """A broken URL in the middle is dropped; the stream keeps going.
@@ -497,9 +536,9 @@ class TestGeneratorContract:
         import warnings
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")  # broken URL emits a UserWarning
-            images = list(get_feature_stream("train", base_dir=str(tmp_path)))
-        # Assert: only the two decodable images survived.
-        assert len(images) == 2  # the single broken URL was dropped
+            pairs = list(get_feature_stream("train", base_dir=str(tmp_path)))
+        # Assert: only the two decodable images survived (each a (image, label) pair).
+        assert len(pairs) == 2  # the single broken URL was dropped
 
 
 # ===========================================================================
