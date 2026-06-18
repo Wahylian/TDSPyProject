@@ -30,6 +30,7 @@ Requirements:
 import csv
 import json
 import os
+import random
 import warnings
 from io import BytesIO
 from typing import Generator, List, Optional, Tuple
@@ -183,13 +184,22 @@ def _download_image(url: str) -> np.ndarray | None:
 def get_feature_stream(
     split: str,
     base_dir: str = "./data",
+    random_seed: Optional[int] = 42,
 ) -> Generator[Tuple[np.ndarray, Label], None, None]:
     """
     Yield ``(image, label)`` pairs for every downloadable URL in a dataset split.
 
+    The order of yielded pairs is randomized: the lightweight ``(url, label)``
+    metadata list is shuffled up front, then images are downloaded and decoded
+    one at a time in that shuffled order. Only the cheap URL/label strings are
+    held in memory; the heavy decoded images remain streamed one at a time.
+
     Args:
         split: Dataset partition to load. Must be ``"train"``, ``"test"``, or ``"val"``.
         base_dir: Directory containing split metadata files. Defaults to ``"./data"``.
+        random_seed: Optional seed for the shuffle. Pass an int to reproduce a
+            specific ordering (e.g. in tests); leave ``None`` for a fresh random
+            ordering each run.
 
     Yields:
         Tuple[np.ndarray, Label]: A pair of
@@ -208,6 +218,12 @@ def get_feature_stream(
         ...     print(image.shape, label)
     """
     entries = _load_image_entries(split, base_dir)
+
+    # Shuffle the lightweight (url, label) metadata in place so the resulting
+    # datastream is randomized rather than following dataset/file order. A local
+    # Random instance keeps the shuffle reproducible (when seeded) without
+    # touching global RNG state.
+    random.Random(random_seed).shuffle(entries)
 
     for url, label in entries:
         image = _download_image(url)

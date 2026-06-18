@@ -49,33 +49,33 @@ def create_train_val_test_split(seed: int = 42) -> None:
     # Create indices and shuffle
     indices = np.arange(len(data))
     np.random.shuffle(indices)
-
-    # Reorder the rows themselves into the shuffled order, so the saved CSV is
-    # shuffled — not just the split labels. The source dataset is grouped by
-    # class; without physically reordering, every row keeps its original
-    # position and the classes stay block-sorted in the output, so any consumer
-    # that reads the rows sequentially (e.g. a streaming loader with a sample
-    # cap) sees one class before the other.
-    data = data.iloc[indices].reset_index(drop=True)
-
+    
     # Calculate split points
     n_samples = len(data)
     train_size = int(0.70 * n_samples)
     val_size = int(0.15 * n_samples)
-    test_size = n_samples - train_size - val_size
-
-    # Assign splits to contiguous ranges of the now-shuffled rows. Because the
-    # rows are already shuffled, contiguous slices are themselves random samples
-    # and the per-row assignment matches the previous index-based logic.
-    data['data_split'] = (
-        ['train'] * train_size + ['val'] * val_size + ['test'] * test_size
-    )
-
+    
+    # Split indices
+    train_indices = indices[:train_size]
+    val_indices = indices[train_size:train_size + val_size]
+    test_indices = indices[train_size + val_size:]
+    
+    # Create split column
+    data_split = [''] * len(data)
+    for idx in train_indices:
+        data_split[idx] = 'train'
+    for idx in val_indices:
+        data_split[idx] = 'val'
+    for idx in test_indices:
+        data_split[idx] = 'test'
+    
+    data['data_split'] = data_split
+    
     # Display split statistics
     print(f"\nSplit Statistics:")
-    print(f"  Train: {train_size} samples ({100 * train_size / n_samples:.1f}%)")
-    print(f"  Val:   {val_size} samples ({100 * val_size / n_samples:.1f}%)")
-    print(f"  Test:  {test_size} samples ({100 * test_size / n_samples:.1f}%)")
+    print(f"  Train: {len(train_indices)} samples ({100 * len(train_indices) / n_samples:.1f}%)")
+    print(f"  Val:   {len(val_indices)} samples ({100 * len(val_indices) / n_samples:.1f}%)")
+    print(f"  Test:  {len(test_indices)} samples ({100 * len(test_indices) / n_samples:.1f}%)")
     
     # Save to datasets/split_dataset.csv
     datasets_dir = os.path.join(script_dir, "datasets")
