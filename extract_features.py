@@ -1,188 +1,136 @@
 """
-Stream image arrays from local path metadata for memory-efficient ML pipelines.
+Stream ``(image, label)`` pairs for a dataset split from the manifest CSV.
 
-Loads image paths (and their labels, when present) from split metadata files
-under ``base_dir``, reads each image from local storage, decodes it to a BGR
-NumPy array (OpenCV convention, matching the ``preprocessing`` package), and
-yields ``(image, label)`` pairs one at a time for supervised learning.
+Reads the manifest produced by ``create_split.py`` (columns ``photo_name``,
+``photo_path``, ``label``, ``split``), filters it to the requested split, loads
+each image from local storage, decodes it to a BGR NumPy array (OpenCV
+convention, matching the ``preprocessing`` package), and yields
+``(image, label)`` pairs one at a time. Only the lightweight ``(path, label)``
+rows are held in memory; the heavy decoded images are streamed one by one, so a
+large split never has to be loaded all at once.
 
-Images are expected to have been pre-downloaded by ``download_photos.py`` into a
-local ``photos`` directory; the path metadata is produced by ``create_split.py``.
-Paths recorded relative to the project root are resolved against this script's
-directory, so streaming works regardless of the caller's working directory.
-
-Labels come from a ``label_numeric`` (preferred) or ``label`` column in CSV
-metadata. JSON metadata and CSVs without such a column yield ``label=None``.
+Image paths recorded relative to the project root are resolved against this
+script's directory, so streaming works regardless of the caller's working
+directory.
 
 Typical usage::
 
-    for image, label in get_feature_stream("train", base_dir="./datasets"):
+    for image, label in get_feature_stream("train"):
         features = pipeline.process(image)
         # train downstream on (features, label)
-
-Metadata lookup (first match wins)::
-
-    {base_dir}/{split}.json
-    {base_dir}/{split}.csv
-    {base_dir}/split.json          (keyed by split name)
-    {base_dir}/split.csv           (filtered by data_split / split column)
-    {base_dir}/split_dataset.csv   (filtered by data_split / split column)
 
 Requirements:
     pip install numpy opencv-python
 """
 
+from __future__ import annotations
+
 import csv
-import json
 import os
 import random
 import warnings
+from pathlib import Path
 from typing import Generator, List, Optional, Tuple
 
 import cv2
 import numpy as np
 
-VALID_SPLITS = frozenset({"train", "test", "val"})
-PATH_COLUMNS = ("image_path", "path")
-SPLIT_COLUMNS = ("data_split", "split")
-LABEL_COLUMNS = ("label_numeric", "label")
+# The three partition names the manifest's "split" column may contain.
+VALID_SPLITS = frozenset({"train", "val", "test"})
 
 # Directory of this script. Image paths recorded relative to the project root
-# (as written by download_photos.py) are resolved against it, so loading does not
+# (as written by create_split.py) are resolved against it, so loading does not
 # depend on the caller's current working directory.
-_PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_DIR = Path(__file__).resolve().parent
 
-# A single metadata entry: an image path paired with its label. The label is the
-# raw value from the metadata's label column, or ``None`` when the metadata
-# carries no label (JSON files, or CSVs without a label column).
-Label = Optional[str]
-Entry = Tuple[str, Label]
+# Default manifest location, matching create_split.py's default output.
+DEFAULT_CSV = PROJECT_DIR / "datasets" / "dataset_split.csv"
+
+# Manifest column names. These must match the columns written by create_split.py.
+PATH_COLUMN = "photo_path"
+LABEL_COLUMN = "label"
+SPLIT_COLUMN = "split"
+
+# A single manifest entry: an image path paired with its integer label.
+Entry = Tuple[str, int]
 
 
 def _validate_split(split: str) -> None:
+    """Raise ``ValueError`` unless *split* is one of the recognized partitions."""
     if split not in VALID_SPLITS:
         raise ValueError(
             f"split must be one of {sorted(VALID_SPLITS)}, got '{split}'"
         )
 
 
-def _entries_from_json(path: str, split: str) -> List[Entry]:
-    """Load ``(image_path, label)`` entries from JSON metadata.
+def _load_entries(split: str, csv_path: str) -> List[Entry]:
+    """Load the ``(photo_path, label)`` entries for one split from the manifest.
 
-    JSON metadata carries only image paths, so every entry is unlabeled
-    (``label=None``).
+    Reads the manifest CSV, keeps only the rows whose ``split`` column matches
+    the requested split, and pairs each image path with its integer label.
+
+    Args:
+        split: Partition to load. Must be ``"train"``, ``"val"`` or ``"test"``.
+        csv_path: Path to the manifest CSV produced by ``create_split.py``.
+
+    Returns:
+        A list of ``(photo_path, label)`` tuples for the requested split.
+
+    Raises:
+        ValueError: If ``split`` is unknown or the CSV lacks a required column.
+        FileNotFoundError: If the manifest CSV does not exist.
     """
-    with open(path, encoding="utf-8") as f:
-        data = json.load(f)
+    _validate_split(split)
 
-    if isinstance(data, list):
-        return [(str(item), None) for item in data]
+    csv_path = str(csv_path)
+    if not os.path.isfile(csv_path):
+        raise FileNotFoundError(
+            f"Manifest CSV not found: {csv_path}. Run create_split.py first."
+        )
 
-    if isinstance(data, dict):
-        if split in data:
-            return [(str(item), None) for item in data[split]]
-        if "paths" in data:
-            return [(str(item), None) for item in data["paths"]]
-
-    raise ValueError(f"Unrecognized JSON structure in {path}")
-
-
-def _path_column(fieldnames: List[str]) -> str:
-    for column in PATH_COLUMNS:
-        if column in fieldnames:
-            return column
-    raise ValueError(
-        f"CSV must contain one of {PATH_COLUMNS}, got columns: {fieldnames}"
-    )
-
-
-def _split_column(fieldnames: List[str]) -> str | None:
-    for column in SPLIT_COLUMNS:
-        if column in fieldnames:
-            return column
-    return None
-
-
-def _label_column(fieldnames: List[str]) -> str | None:
-    for column in LABEL_COLUMNS:
-        if column in fieldnames:
-            return column
-    return None
-
-
-def _entries_from_csv(path: str, split: str, filter_by_split: bool) -> List[Entry]:
     entries: List[Entry] = []
-
-    with open(path, newline="", encoding="utf-8") as f:
+    with open(csv_path, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
-        if not reader.fieldnames:
-            raise ValueError(f"CSV file is empty: {path}")
+        fieldnames = reader.fieldnames or []
 
-        path_col = _path_column(reader.fieldnames)
-        label_col = _label_column(reader.fieldnames)
-        split_col = _split_column(reader.fieldnames) if filter_by_split else None
-
-        if filter_by_split and split_col is None:
-            raise ValueError(
-                f"CSV {path} must contain a split column "
-                f"({SPLIT_COLUMNS}) when not using per-split files"
-            )
+        # Fail loudly if the manifest is missing any column we depend on, rather
+        # than silently yielding nothing.
+        for column in (PATH_COLUMN, LABEL_COLUMN, SPLIT_COLUMN):
+            if column not in fieldnames:
+                raise ValueError(
+                    f"Manifest {csv_path} is missing required column '{column}'. "
+                    f"Found columns: {fieldnames}"
+                )
 
         for row in reader:
-            if filter_by_split and row.get(split_col) != split:
+            # Keep only rows belonging to the requested split.
+            if row[SPLIT_COLUMN] != split:
                 continue
-            image_path = row.get(path_col, "").strip()
-            # An empty path marks an image that could not be downloaded; skip it
-            # here so it never reaches the stream (the datapoint is preserved in
-            # the metadata, but there is no image to yield).
-            if not image_path:
+            path = row[PATH_COLUMN].strip()
+            # Skip rows with no path; there is no image to stream for them.
+            if not path:
                 continue
-            # Read the label from the same row so it stays aligned with its path.
-            # Missing column or empty cell -> None (unlabeled).
-            label = row.get(label_col, "").strip() if label_col else None
-            entries.append((image_path, label or None))
+            label = int(row[LABEL_COLUMN])
+            entries.append((path, label))
 
     return entries
 
 
-def _load_image_entries(split: str, base_dir: str) -> List[Entry]:
-    """Resolve and load ``(image_path, label)`` entries for the requested split from metadata files."""
-    _validate_split(split)
-
-    if not os.path.isdir(base_dir):
-        raise FileNotFoundError(f"base_dir does not exist: {base_dir}")
-
-    candidates = [
-        (os.path.join(base_dir, f"{split}.json"), "json", False),
-        (os.path.join(base_dir, f"{split}.csv"), "csv", False),
-        (os.path.join(base_dir, "split.json"), "json", True),
-        (os.path.join(base_dir, "split.csv"), "csv", True),
-        (os.path.join(base_dir, "split_dataset.csv"), "csv", True),
-    ]
-
-    for path, fmt, filter_by_split in candidates:
-        if not os.path.isfile(path):
-            continue
-
-        if fmt == "json":
-            return _entries_from_json(path, split)
-        return _entries_from_csv(path, split, filter_by_split=filter_by_split)
-
-    raise FileNotFoundError(
-        f"No metadata file found for split '{split}' in {base_dir}. "
-        f"Expected one of: {split}.json, {split}.csv, split.json, "
-        f"split.csv, or split_dataset.csv"
-    )
-
-
-def _load_image(path: str) -> np.ndarray | None:
+def _load_image(path: str) -> Optional[np.ndarray]:
     """Read a single image from local storage and return it as a BGR NumPy array.
 
     Relative paths are resolved against the project directory. An image that is
     missing or cannot be decoded yields ``None`` (after a warning) so one bad
     file does not abort the stream.
+
+    Args:
+        path: Image path, absolute or relative to the project root.
+
+    Returns:
+        The decoded image as a ``uint8`` BGR array of shape
+        ``(height, width, 3)``, or ``None`` if it could not be read.
     """
-    resolved = path if os.path.isabs(path) else os.path.join(_PROJECT_DIR, path)
+    resolved = path if os.path.isabs(path) else os.path.join(PROJECT_DIR, path)
     image = cv2.imread(resolved, cv2.IMREAD_COLOR)
     if image is None:
         warnings.warn(f"Skipping unreadable image {path}")
@@ -192,46 +140,42 @@ def _load_image(path: str) -> np.ndarray | None:
 
 def get_feature_stream(
     split: str,
-    base_dir: str = "./datasets",
+    csv_path: str = DEFAULT_CSV,
     random_seed: Optional[int] = 42,
-) -> Generator[Tuple[np.ndarray, Label], None, None]:
-    """
-    Yield ``(image, label)`` pairs for every readable image in a dataset split.
+) -> Generator[Tuple[np.ndarray, int], None, None]:
+    """Yield ``(image, label)`` pairs for every readable image in a split.
 
-    The order of yielded pairs is randomized: the lightweight ``(path, label)``
-    metadata list is shuffled up front, then images are read and decoded one at a
-    time in that shuffled order. Only the cheap path/label strings are held in
-    memory; the heavy decoded images remain streamed one at a time.
+    The ``(path, label)`` rows for the split are loaded from the manifest and
+    shuffled up front (so the stream is not biased by file/class order), then
+    images are read and decoded one at a time in that shuffled order. Only the
+    cheap path/label strings are held in memory; decoded images stay streamed.
 
     Args:
-        split: Dataset partition to load. Must be ``"train"``, ``"test"``, or ``"val"``.
-        base_dir: Directory containing split metadata files. Defaults to ``"./datasets"``.
-        random_seed: Optional seed for the shuffle. Pass an int to reproduce a
-            specific ordering (e.g. in tests); leave ``None`` for a fresh random
-            ordering each run.
+        split: Partition to load. Must be ``"train"``, ``"val"`` or ``"test"``.
+        csv_path: Path to the manifest CSV. Defaults to
+            ``datasets/dataset_split.csv``.
+        random_seed: Seed for the shuffle. Pass an int to reproduce a specific
+            ordering (e.g. in tests); pass ``None`` for a fresh ordering each run.
 
     Yields:
-        Tuple[np.ndarray, Label]: A pair of
         ``(image, label)`` where ``image`` is the decoded picture in BGR format
         (OpenCV convention) with shape ``(height, width, 3)`` and dtype
-        ``uint8``, and ``label`` is the raw label value from the metadata
-        (e.g. from ``label_numeric``) or ``None`` when the metadata is unlabeled.
-        The label always corresponds to the image yielded alongside it.
+        ``uint8``, and ``label`` is the integer class label (0 for Real, 1 for
+        Deepfake) from the same manifest row.
 
     Raises:
         ValueError: If ``split`` is not a recognized partition name.
-        FileNotFoundError: If ``base_dir`` or the required metadata file is missing.
+        FileNotFoundError: If the manifest CSV is missing.
 
     Example:
-        >>> for image, label in get_feature_stream("train", base_dir="./datasets"):
+        >>> for image, label in get_feature_stream("train"):
         ...     print(image.shape, label)
     """
-    entries = _load_image_entries(split, base_dir)
+    entries = _load_entries(split, csv_path)
 
-    # Shuffle the lightweight (path, label) metadata in place so the resulting
-    # datastream is randomized rather than following dataset/file order. A local
-    # Random instance keeps the shuffle reproducible (when seeded) without
-    # touching global RNG state.
+    # Shuffle the lightweight (path, label) rows so the stream is randomized
+    # rather than following dataset/file order. A local Random instance keeps the
+    # shuffle reproducible (when seeded) without touching global RNG state.
     random.Random(random_seed).shuffle(entries)
 
     for path, label in entries:
@@ -244,13 +188,13 @@ if __name__ == "__main__":
     import sys
 
     split_name = sys.argv[1] if len(sys.argv) > 1 else "train"
-    data_dir = sys.argv[2] if len(sys.argv) > 2 else "./datasets"
+    manifest = sys.argv[2] if len(sys.argv) > 2 else DEFAULT_CSV
 
-    print(f"Streaming '{split_name}' images from {data_dir}...")
+    print(f"Streaming '{split_name}' images from {manifest}...")
     count = 0
-    for img, label in get_feature_stream(split_name, base_dir=data_dir):
+    for img, lbl in get_feature_stream(split_name, csv_path=manifest):
         count += 1
-        print(f"  [{count}] shape={img.shape}, dtype={img.dtype}, label={label}")
+        print(f"  [{count}] shape={img.shape}, dtype={img.dtype}, label={lbl}")
         if count >= 3:
             print("  (stopping after 3 images)")
             break

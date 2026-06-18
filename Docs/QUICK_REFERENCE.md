@@ -320,9 +320,9 @@ TDSPyProject/
 │   └── io.py                        # image loaders
 ├── prebuilt_pipelines.py            # Named ready-made pipelines
 ├── integration_example.py           # Data/feature/train/eval helpers
-├── download_photos.py               # Pre-downloads images to photos/ + writes datasets/photos_dataset.csv
-├── create_split.py                  # Builds datasets/split_dataset.csv (train/val/test) from the mapping
-├── extract_features.py              # Local-path image streamer (reads photos/ from split metadata)
+├── download_dataset.py              # Downloads the deepfake-vs-real-20k images into datasets/
+├── create_split.py                  # Scans Real/Deepfake folders -> datasets/dataset_split.csv (70/15/15)
+├── extract_features.py              # Manifest-driven image streamer (reads datasets/dataset_split.csv)
 ├── tests/                           # pytest suite
 └── Docs/
     ├── IMAGE_PREPROCESSING_GUIDE.md # Full documentation
