@@ -559,6 +559,37 @@ class TestGeneratorContract:
         # Assert: only the two decodable images survived (each a (image, label) pair).
         assert len(pairs) == 2  # the single broken URL was dropped
 
+    def test_load_failures_counted_in_stats(self, tmp_path, monkeypatch):
+        """A provided ``stats`` dict tallies each dropped URL as a load failure.
+
+        The opt-in counter lets callers report the exact number of images that
+        failed to load without scraping warning text.
+        """
+        good = _png_bytes()
+
+        def fake_get(url, timeout=None):
+            if "bad" in url:
+                return _FakeResponse(b"broken", status_ok=True)
+            return _FakeResponse(good, status_ok=True)
+
+        monkeypatch.setattr(ef.requests, "get", fake_get)
+        _write_split_csv(
+            tmp_path / "split_dataset.csv",
+            rows=[
+                ("http://example.com/good1.png", "train"),
+                ("http://example.com/bad1.png", "train"),
+                ("http://example.com/bad2.png", "train"),
+                ("http://example.com/good2.png", "train"),
+            ],
+        )
+        stats = {"load_failures": 0}
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")  # broken URLs emit UserWarnings
+            pairs = list(get_feature_stream("train", base_dir=str(tmp_path), stats=stats))
+        assert len(pairs) == 2          # two good images survived
+        assert stats["load_failures"] == 2  # both broken URLs were counted
+
 
 # ===========================================================================
 # 6. BGR colour convention (synthetic, no network)

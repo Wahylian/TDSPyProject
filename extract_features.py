@@ -33,7 +33,7 @@ import os
 import random
 import warnings
 from io import BytesIO
-from typing import Generator, List, Optional, Tuple
+from typing import Dict, Generator, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -185,6 +185,7 @@ def get_feature_stream(
     split: str,
     base_dir: str = "./data",
     random_seed: Optional[int] = 42,
+    stats: Optional[Dict[str, int]] = None,
 ) -> Generator[Tuple[np.ndarray, Label], None, None]:
     """
     Yield ``(image, label)`` pairs for every downloadable URL in a dataset split.
@@ -200,6 +201,14 @@ def get_feature_stream(
         random_seed: Optional seed for the shuffle. Pass an int to reproduce a
             specific ordering (e.g. in tests); leave ``None`` for a fresh random
             ordering each run.
+        stats: Optional mutable counter for failure bookkeeping. When provided,
+            the generator increments ``stats["load_failures"]`` once for every
+            URL that could not be downloaded/decoded (the same images it silently
+            drops). A *mutable* dict is used — rather than a return value —
+            precisely because callers commonly stop iterating early (e.g. after
+            collecting N samples); the count stays readable after a partial drain
+            because the caller still holds a reference to the dict. The
+            ``"load_failures"`` key is created if absent.
 
     Yields:
         Tuple[np.ndarray, Label]: A pair of
@@ -214,9 +223,14 @@ def get_feature_stream(
         FileNotFoundError: If ``base_dir`` or the required metadata file is missing.
 
     Example:
-        >>> for image, label in get_feature_stream("train", base_dir="./datasets"):
+        >>> stats = {"load_failures": 0}
+        >>> for image, label in get_feature_stream("train", base_dir="./datasets", stats=stats):
         ...     print(image.shape, label)
+        >>> print(stats["load_failures"])  # how many URLs failed to load
     """
+    if stats is not None:
+        stats.setdefault("load_failures", 0)
+
     entries = _load_image_entries(split, base_dir)
 
     # Shuffle the lightweight (url, label) metadata in place so the resulting
@@ -229,6 +243,10 @@ def get_feature_stream(
         image = _download_image(url)
         if image is not None:
             yield image, label
+        elif stats is not None:
+            # A None image means the download/decode failed (a warning was
+            # already emitted in _download_image); tally it for the caller.
+            stats["load_failures"] += 1
 
 
 if __name__ == "__main__":
