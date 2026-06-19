@@ -1,12 +1,12 @@
 """
 Tests for the dataset splitter in ``create_split.py``.
 
-``create_split`` scans a dataset directory holding a ``Real`` and a ``Deepfake``
-subfolder of ``.jpg`` images and writes a single manifest CSV with the columns
-``photo_name``, ``photo_path``, ``label`` and ``split``. The rows are shuffled
-with a seeded RNG and partitioned 70/15/15 into train/val/test.
+``create_split`` scans a dataset directory holding a ``real`` and a ``fake``
+subfolder of ``.jpg``/``.png`` images and writes a single manifest CSV with the
+columns ``photo_name``, ``photo_path``, ``label`` and ``split``. The rows are
+shuffled with a seeded RNG and partitioned 70/15/15 into train/val/test.
 
-These tests build a small, real dataset tree under ``tmp_path`` (empty ``.jpg``
+These tests build a small, real dataset tree under ``tmp_path`` (empty image
 files are enough — the splitter only scans filenames) and write the manifest to
 ``tmp_path`` too, so nothing touches the repository's real dataset.
 """
@@ -24,15 +24,15 @@ import create_split as cs
 # ===========================================================================
 
 def _make_dataset_tree(root, n_real: int, n_fake: int):
-    """Create a Real/ and Deepfake/ tree of empty ``.jpg`` files under *root*.
+    """Create a real/ and fake/ tree of empty ``.jpg`` files under *root*.
 
     The splitter only globs filenames, so the files need no real image bytes.
 
     Returns:
         The dataset directory (the parent of the two class subfolders).
     """
-    real_dir = root / "Real"
-    fake_dir = root / "Deepfake"
+    real_dir = root / "real"
+    fake_dir = root / "fake"
     real_dir.mkdir(parents=True)
     fake_dir.mkdir(parents=True)
     for i in range(n_real):
@@ -79,14 +79,14 @@ class TestCreateSplitErrors:
             )
 
     def test_missing_class_subfolder_raises_filenotfound(self, tmp_path):
-        """A dataset dir missing the Deepfake/ subfolder raises ``FileNotFoundError``.
+        """A dataset dir missing the fake/ subfolder raises ``FileNotFoundError``.
 
         Edge case: the directory exists but its expected class layout is
         incomplete, so the splitter must fail loudly rather than emit a manifest
         covering only one class.
         """
-        # Arrange: only the Real/ subfolder is present.
-        (tmp_path / "data" / "Real").mkdir(parents=True)
+        # Arrange: only the real/ subfolder is present.
+        (tmp_path / "data" / "real").mkdir(parents=True)
         with pytest.raises(FileNotFoundError):
             cs.create_split(
                 data_dir=tmp_path / "data",
@@ -110,6 +110,25 @@ class TestManifestContent:
         """Every ``.jpg`` under both class folders appears exactly once."""
         df = run_split()
         assert len(df) == run_split.n
+
+    def test_png_and_jpg_images_are_both_included(self, tmp_path):
+        """The scan picks up ``.png`` images as well as ``.jpg`` ones.
+
+        The dataset mixes both formats, so a manifest that only globbed ``.jpg``
+        would silently drop every PNG.
+        """
+        real_dir = tmp_path / "data" / "real"
+        fake_dir = tmp_path / "data" / "fake"
+        real_dir.mkdir(parents=True)
+        fake_dir.mkdir(parents=True)
+        (real_dir / "real_0.jpg").write_bytes(b"")
+        (real_dir / "real_1.png").write_bytes(b"")
+        (fake_dir / "fake_0.png").write_bytes(b"")
+
+        df = cs.create_split(
+            data_dir=tmp_path / "data", output_csv=tmp_path / "out.csv"
+        )
+        assert set(df["photo_name"]) == {"real_0.jpg", "real_1.png", "fake_0.png"}
 
     def test_labels_match_class_folders(self, run_split):
         """Real images get label 0 and Deepfake images get label 1.

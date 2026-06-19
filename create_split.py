@@ -1,13 +1,13 @@
 """
-Generate a train/val/test split manifest for the deepfake-vs-real image dataset.
+Generate a train/val/test split manifest for the deepdetect-2025 image dataset.
 
-Scans the on-disk dataset directory — which contains a ``Real`` and a
-``Deepfake`` subfolder of ``.jpg`` images — and writes a single CSV manifest
+Scans the on-disk dataset directory — which contains a ``real`` and a
+``fake`` subfolder of ``.jpg``/``.png`` images — and writes a single CSV manifest
 describing every image with these columns:
 
-    photo_name  the image filename (e.g. ``111 (1).jpg``)
+    photo_name  the image filename (e.g. ``real_000123.jpg``)
     photo_path  the image path relative to the project root, using forward slashes
-    label       integer class label: 0 for Real, 1 for Deepfake
+    label       integer class label: 0 for real, 1 for fake
     split       the assigned partition: "train", "val", or "test"
 
 The images are shuffled with a seeded RNG (default seed 42) and partitioned
@@ -37,14 +37,21 @@ import pandas as pd
 # manifest stays valid regardless of the caller's working directory.
 PROJECT_DIR = Path(__file__).resolve().parent
 
-# Default location of the image dataset (the folder holding Real/ and Deepfake/).
-DEFAULT_DATA_DIR = PROJECT_DIR / "datasets" / "deepfake-vs-real-20k" / "Deep-vs-Real"
+# Default location of the image dataset (the folder holding real/ and fake/),
+# as downloaded and restructured by data_download_test.py. kagglehub stores it
+# under a versioned cache path; version 1 is the dataset currently on disk.
+DEFAULT_DATA_DIR = (
+    PROJECT_DIR / "datasets" / "ayushmandatta1" / "deepdetect-2025" / "versions" / "1"
+)
 
 # Default output path for the generated split manifest.
 DEFAULT_OUTPUT_CSV = PROJECT_DIR / "datasets" / "dataset_split.csv"
 
 # Map each class subfolder name to its integer label.
-LABEL_BY_FOLDER: Dict[str, int] = {"Real": 0, "Deepfake": 1}
+LABEL_BY_FOLDER: Dict[str, int] = {"real": 0, "fake": 1}
+
+# Image file patterns to scan (the dataset mixes .jpg and .png images).
+IMAGE_PATTERNS = ("*.jpg", "*.png")
 
 # Fraction of images assigned to each partition. The test split takes the
 # remainder so the three fractions always sum to exactly the dataset size.
@@ -56,15 +63,15 @@ COLUMNS = ["photo_name", "photo_path", "label", "split"]
 
 
 def _scan_images(data_dir: Path) -> pd.DataFrame:
-    """Collect every ``.jpg`` image under the Real/ and Deepfake/ subfolders.
+    """Collect every ``.jpg``/``.png`` image under the real/ and fake/ subfolders.
 
     Args:
-        data_dir: Directory containing the ``Real`` and ``Deepfake`` subfolders.
+        data_dir: Directory containing the ``real`` and ``fake`` subfolders.
 
     Returns:
         A DataFrame with one row per image and the columns ``photo_name``,
         ``photo_path`` (relative to the project root, forward slashes) and
-        ``label`` (0 for Real, 1 for Deepfake).
+        ``label`` (0 for real, 1 for fake).
 
     Raises:
         FileNotFoundError: If ``data_dir`` or one of its class subfolders is
@@ -79,9 +86,11 @@ def _scan_images(data_dir: Path) -> pd.DataFrame:
         if not class_dir.is_dir():
             raise FileNotFoundError(f"Expected class subfolder is missing: {class_dir}")
 
-        # Sort the filenames so the scan order is deterministic; the final row
-        # order is decided by the seeded shuffle in _assign_splits, not here.
-        for image_path in sorted(class_dir.glob("*.jpg")):
+        # Collect all supported image types, then sort so the scan order is
+        # deterministic; the final row order is decided by the seeded shuffle in
+        # _assign_splits, not here.
+        image_paths = [p for pattern in IMAGE_PATTERNS for p in class_dir.glob(pattern)]
+        for image_path in sorted(image_paths):
             rows.append(
                 {
                     "photo_name": image_path.name,
@@ -134,7 +143,7 @@ def create_split(
     """Scan the dataset, build a 70/15/15 split, and write the manifest CSV.
 
     Args:
-        data_dir: Directory containing the ``Real`` and ``Deepfake`` subfolders.
+        data_dir: Directory containing the ``real`` and ``fake`` subfolders.
         output_csv: Path the manifest CSV is written to. Parent directories are
             created if needed.
         seed: Seed for the reproducible shuffle. Defaults to 42.
@@ -168,7 +177,7 @@ def _parse_args() -> argparse.Namespace:
         "--data-dir",
         type=Path,
         default=DEFAULT_DATA_DIR,
-        help="Directory holding the Real/ and Deepfake/ subfolders.",
+        help="Directory holding the real/ and fake/ subfolders.",
     )
     parser.add_argument(
         "--output-csv",
@@ -196,4 +205,4 @@ if __name__ == "__main__":
           f"val={counts.get('val', 0)}, test={counts.get('test', 0)}")
     label_counts = df["label"].value_counts().to_dict()
     print(f"  labels: real(0)={label_counts.get(0, 0)}, "
-          f"deepfake(1)={label_counts.get(1, 0)}")
+          f"fake(1)={label_counts.get(1, 0)}")
