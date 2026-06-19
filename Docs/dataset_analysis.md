@@ -5,15 +5,15 @@
 
 ## 1. Dataset Overview
 
-**Source:** `prithivsakthiur/deepfake-vs-real-20k` (Kaggle) — downloaded locally
-as `.jpg` image files.
+**Source:** `ayushmandatta1/deepdetect-2025` (Kaggle) — downloaded locally
+as `.jpg`/`.png` image files.
 
 | Property | Value |
 |---|---|
-| Total images | 14,433 |
-| Layout | Two class folders of `.jpg` images: `Real/` and `Deepfake/` |
-| Task | Binary image classification (Real vs Deepfake) |
-| Label source | Parent folder name (`Real` → 0, `Deepfake` → 1) |
+| Total images | 112,185 |
+| Layout | Two class folders of `.jpg`/`.png` images: `real/` and `fake/` |
+| Task | Binary image classification (real vs fake) |
+| Label source | Parent folder name (`real` → 0, `fake` → 1) |
 
 Unlike a tabular dataset, this one ships purely as images on disk — there is no
 accompanying metadata CSV. `create_split.py` constructs our own manifest from the
@@ -26,32 +26,34 @@ random seed so all results are reproducible and directly comparable across model
 partitions them 70% / 15% / 15% into train / val / test. The split is a plain
 random shuffle (not explicitly stratified); because shuffling preserves the
 overall class ratio closely, each partition still lands near the global
-~34% Real / ~66% Deepfake balance:
+~54% real / ~46% fake balance:
 
-| Split | Proportion | Real (0) | Deepfake (1) | Total |
+| Split | Proportion | real (0) | fake (1) | Total |
 |---|---|---|---|---|
-| Train | 70% | 3,457 | 6,646 | 10,103 |
-| Validation | 15% | 674 | 1,490 | 2,164 |
-| Test | 15% | 726 | 1,440 | 2,166 |
-| **Total** | 100% | 4,857 | 9,576 | 14,433 |
+| Train | 70% | ~42,131 | ~36,398 | 78,529 |
+| Validation | 15% | ~9,028 | ~7,799 | 16,827 |
+| Test | 15% | ~9,029 | ~7,800 | 16,829 |
+| **Total** | 100% | 60,192 | 51,993 | 112,185 |
+
+> The split *totals* and class *totals* are exact; the per-class counts *within*
+> each split are proportional estimates, since the partition is a global,
+> non-stratified seed-42 shuffle. Re-run `create_split.py` to emit the exact
+> per-split breakdown.
 
 ---
 
-## 2. Class Imbalance
+## 2. Class Balance
 
-**Finding:** The dataset is imbalanced — 9,576 Deepfake (66.3%) vs 4,857 Real
-(33.7%), a ratio of approximately 1.97:1 in favour of Deepfake.
+**Finding:** The dataset is close to balanced — 60,192 real (53.7%) vs 51,993
+fake (46.3%), a ratio of approximately 1.16:1 in favour of real.
 
-**Decision: No resampling (monitor instead).** Both classes are well-represented
-in absolute terms (thousands of images each), so the data is left untouched:
+**Decision: No resampling.** Both classes are well-represented (tens of thousands
+of images each) and the skew is mild, so the data is left untouched:
 
-- Pass `class_weight='balanced'` to classical models (SVM, LR) to adjust the loss
-  function without altering the data.
-- Monitor per-class recall and F1 in every evaluation. If a model is
-  systematically biased toward predicting Deepfake as a shortcut, resampling will
-  be revisited — specifically **undersampling the Deepfake class** (dropping
-  ~4,700 rows to balance the classes) rather than oversampling, to avoid
-  synthetic-sample artifacts.
+- Optionally pass `class_weight='balanced'` to classical models (SVM, LR); with a
+  ratio this close to 1:1 it has only a minor effect.
+- Monitor per-class recall and F1 in every evaluation. The mild skew is unlikely
+  to induce a shortcut bias, but if one appears it will be revisited.
 
 ---
 
@@ -64,17 +66,17 @@ be for a tabular dataset). The label is assigned directly from the class folder:
 
 | Folder | Label |
 |---|---|
-| `Real/` | `0` |
-| `Deepfake/` | `1` |
+| `real/` | `0` |
+| `fake/` | `1` |
 
 `create_split.py` records this in a manifest CSV, `datasets/dataset_split.csv`,
 which is the single source of truth consumed downstream:
 
 | Column | Description |
 |---|---|
-| `photo_name` | The image filename (e.g. `CCO (410).jpg`) |
+| `photo_name` | The image filename (e.g. `real_000123.jpg`) |
 | `photo_path` | The image path relative to the project root, forward-slashed |
-| `label` | Integer class label: `0` for Real, `1` for Deepfake |
+| `label` | Integer class label: `0` for real, `1` for fake |
 | `split` | The assigned partition: `train`, `val`, or `test` |
 
 Because the label is derived from folder membership rather than any recorded
@@ -104,7 +106,7 @@ std  = [0.229, 0.224, 0.225]
 - Small rotation (±10°)
 - Slight colour jitter (brightness/contrast ±0.2)
 
-With ~10,100 training images, augmentation still helps the deep models
+With ~78,500 training images, augmentation still helps the deep models
 generalise. It is applied at the DataLoader level, not inside the streaming loader.
 
 ---
@@ -112,42 +114,44 @@ generalise. It is applied at the DataLoader level, not inside the streaming load
 ## 5. Existing Codebase
 
 The data pipeline runs in three ordered stages, each a standalone script. The
-images ship as local `.jpg` files on disk, so model training reads them straight
-from storage — there is no per-image URL fetching at training time.
+images ship as local `.jpg`/`.png` files on disk, so model training reads them
+straight from storage — there is no per-image URL fetching at training time.
 
 ### `download_dataset.py`
 
 A minimal script that downloads the dataset from Kaggle using the `kagglehub`
-library and copies it into the project's `datasets/` folder, keeping everything
-self-contained.
+library. It points `KAGGLEHUB_CACHE` at the project before importing kagglehub so
+the images land directly inside `datasets/` instead of the global `~/.cache`
+location, then restructures the download into two flat class folders.
 
 ```python
-import shutil
+import os
 from pathlib import Path
+os.environ["KAGGLEHUB_CACHE"] = str(Path(__file__).parent)
 import kagglehub
 
-path = kagglehub.dataset_download("prithivsakthiur/deepfake-vs-real-20k")
-dest = Path(__file__).parent / "datasets" / "deepfake-vs-real-20k"
-shutil.copytree(path, dest, dirs_exist_ok=True)
+path = kagglehub.dataset_download("ayushmandatta1/deepdetect-2025")
+restructure_to_real_fake(Path(path))
 ```
 
-This lands the images under
-`datasets/deepfake-vs-real-20k/Deep-vs-Real/`, which holds two class subfolders
-of `.jpg` images: `Real/` and `Deepfake/`.
+The dataset ships as `ddata/{train,test}/{real,fake}`; the script merges the
+train and test images of each class into a single folder, leaving the data under
+`datasets/ayushmandatta1/deepdetect-2025/versions/1/`, which holds two class
+subfolders of `.jpg`/`.png` images: `real/` and `fake/`.
 
 ### `create_split.py`
 
 Scans the dataset directory and builds a deterministic 70/15/15 train/val/test
-split. It walks the `Real/` and `Deepfake/` subfolders, records every `.jpg`
+split. It walks the `real/` and `fake/` subfolders, records every `.jpg`/`.png`
 image, shuffles the rows with a fixed seed (default `42`), partitions them
 70% / 15% / 15% into train / val / test, and writes
 `datasets/dataset_split.csv` with these columns:
 
 | Column | Description |
 |---|---|
-| `photo_name` | The image filename (e.g. `CCO (410).jpg`) |
+| `photo_name` | The image filename (e.g. `real_000123.jpg`) |
 | `photo_path` | The image path relative to the project root, using forward slashes |
-| `label` | Integer class label: `0` for Real, `1` for Deepfake |
+| `label` | Integer class label: `0` for real, `1` for fake |
 | `split` | The assigned partition: `train`, `val`, or `test` |
 
 The split sizes are `int(0.70 * n)` train, `int(0.15 * n)` val, and the remainder
@@ -209,7 +213,7 @@ Applied after feature extraction, before the classifier. Both options will be te
 | **PCA** | Finds directions of maximum variance. Best for reducing to a small number of components (e.g. 50–200). Data-driven. |
 | **Johnson-Lindenstrauss (JL) random projection** | Preserves pairwise Euclidean distances via random matrix multiplication. No fitting required — fully data-independent. Theoretically well-suited to SVMs (distance-based models). Target dims ~200–400 for this dataset size. |
 
-With ~10,100 training samples, JL targets around 200–400 dimensions for reasonable distortion tolerance (ε ≈ 0.5–0.9). PCA can be pushed further (50–128 components) while retaining most variance. Both will be evaluated.
+With ~78,500 training samples, JL targets around 200–400 dimensions for reasonable distortion tolerance (ε ≈ 0.5–0.9). PCA can be pushed further (50–128 components) while retaining most variance. Both will be evaluated.
 
 Scikit-learn implementations: `sklearn.decomposition.PCA` and `sklearn.random_projection.SparseRandomProjection`.
 
@@ -262,7 +266,7 @@ Vision Transformers have shown strong results on deepfake detection benchmarks b
 
 ### 🥈 Expected Second Tier: CNN Embeddings + Soft-SVM or XGBoost
 
-A pretrained CNN (ResNet/EfficientNet) used purely as a feature extractor, with a Soft-SVM or gradient boosted tree on top, is a well-established and reliable pattern. With ~10,100 training images, the frozen-backbone approach remains attractive since it needs far less data than full fine-tuning. This combination should outperform end-to-end fine-tuning if training data is too small to move the pretrained weights usefully.
+A pretrained CNN (ResNet/EfficientNet) used purely as a feature extractor, with a Soft-SVM or gradient boosted tree on top, is a well-established and reliable pattern. With ~78,500 training images, the frozen-backbone approach remains attractive since it needs far less data than full fine-tuning. This combination should outperform end-to-end fine-tuning if training data is too small to move the pretrained weights usefully.
 
 ### 🥉 Expected Third Tier: Frequency-domain features + Soft-SVM
 
@@ -272,7 +276,7 @@ GAN-based generators are known to produce characteristic high-frequency artifact
 
 - **Hard-SVM on raw pixels:** The hard margin assumption will almost certainly be violated with high-dimensional noisy pixel features. Expected to fail or require extremely aggressive dimensionality reduction.
 - **Linear Regression with threshold:** Fundamental mismatch between the model's output space and the binary task. Included for completeness and as a pedagogical comparison point, not for performance.
-- **Custom CNN trained from scratch:** With ~10,100 images and no pretraining, it is still expected to be clearly dominated by the ImageNet-pretrained alternatives.
+- **Custom CNN trained from scratch:** With ~78,500 images and no pretraining, it is still expected to be clearly dominated by the ImageNet-pretrained alternatives.
 - **PCA/JL + Hard-SVM on raw pixels:** Even with dimensionality reduction, the hard-margin assumption is fragile. JL may help slightly more than PCA here (distance preservation), but neither will rescue Hard-SVM on raw pixels.
 
 ### The Most Interesting Predicted Finding

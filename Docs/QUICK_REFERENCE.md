@@ -320,8 +320,8 @@ TDSPyProject/
 │   └── io.py                        # image loaders
 ├── prebuilt_pipelines.py            # Named ready-made pipelines
 ├── integration_example.py           # Data/feature/train/eval helpers
-├── download_dataset.py              # Downloads the deepfake-vs-real-20k images into datasets/
-├── create_split.py                  # Scans Real/Deepfake folders -> datasets/dataset_split.csv (70/15/15)
+├── download_dataset.py              # Downloads the deepdetect-2025 images into datasets/ (real/fake)
+├── create_split.py                  # Scans real/fake folders -> datasets/dataset_split.csv (70/15/15)
 ├── extract_features.py              # Manifest-driven image streamer (reads datasets/dataset_split.csv)
 ├── tests/                           # pytest suite
 └── Docs/
