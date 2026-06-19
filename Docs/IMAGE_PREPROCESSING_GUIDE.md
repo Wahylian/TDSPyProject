@@ -522,12 +522,15 @@ print(features.shape)  # (4096,)
 
 ## Integration with Your Project
 
-### 1. In `extractfeatures.py`
+### 1. In `extract_features.py`
 
-Add the pipeline to your feature extraction workflow:
+Add the pipeline to your feature extraction workflow. `get_feature_stream`
+yields decoded BGR images read from local storage, one `(image, label)` pair at
+a time:
 
 ```python
 from preprocessing import ImagePipeline
+from extract_features import get_feature_stream
 import numpy as np
 
 # Define your standard preprocessing pipeline
@@ -542,9 +545,8 @@ def extract_image_features(image_array: np.ndarray) -> np.ndarray:
     """Extract 1D feature vector from image for ML model."""
     return ML_PIPELINE.process(image_array)
 
-# Use in your existing pipeline
-for url, label in get_data_stream():
-    image = fetch_image(url)
+# Stream pre-downloaded images straight into the pipeline
+for image, label in get_feature_stream("train", base_dir="./datasets"):
     features = extract_image_features(image)
     # ... train model
 ```

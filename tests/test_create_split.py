@@ -1,164 +1,175 @@
 """
 Tests for the dataset splitter in ``create_split.py``.
 
-``create_train_val_test_split`` loads ``FINAL_DATASET.csv`` and writes a
-deterministic 70/15/15 train/val/test split to ``split_dataset.csv``. These
-tests exercise its real splitting logic while keeping the filesystem isolated:
+``create_split`` scans a dataset directory holding a ``Real`` and a ``Deepfake``
+subfolder of ``.jpg`` images and writes a single manifest CSV with the columns
+``photo_name``, ``photo_path``, ``label`` and ``split``. The rows are shuffled
+with a seeded RNG and partitioned 70/15/15 into train/val/test.
 
-* ``glob.glob`` is monkeypatched so the loader reads a synthetic CSV from
-  ``tmp_path`` (or finds nothing, for the error case);
-* ``DataFrame.to_csv`` is monkeypatched to capture the result in memory instead
-  of writing ``split_dataset.csv`` into the project tree.
+These tests build a small, real dataset tree under ``tmp_path`` (empty ``.jpg``
+files are enough — the splitter only scans filenames) and write the manifest to
+``tmp_path`` too, so nothing touches the repository's real dataset.
 """
 
 from __future__ import annotations
 
+import pandas as pd
 import pytest
 
 import create_split as cs
 
 
-def _write_dataset_csv(path, n_valid: int = 20):
-    """Write a FINAL_DATASET-style CSV with ``n_valid`` rows plus 2 invalid ones.
+# ===========================================================================
+# Test helpers / fixtures
+# ===========================================================================
 
-    Includes an extra ``label_text`` column (to prove it is dropped) and two
-    rows with a missing ``label_numeric`` / ``image_url`` (to exercise dropna).
+def _make_dataset_tree(root, n_real: int, n_fake: int):
+    """Create a Real/ and Deepfake/ tree of empty ``.jpg`` files under *root*.
+
+    The splitter only globs filenames, so the files need no real image bytes.
 
     Returns:
-        int: the number of rows that survive ``dropna`` (i.e. ``n_valid``).
+        The dataset directory (the parent of the two class subfolders).
     """
-    lines = ["image_url,label_numeric,label_text"]
-    for i in range(n_valid):
-        lines.append(f"http://example.com/{i}.jpg,{i % 2},cat{i % 2}")
-    # Two invalid rows: one missing the label, one missing the URL.
-    lines.append("http://example.com/missing_label.jpg,,cat")
-    lines.append(",1,dog")
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    return n_valid
+    real_dir = root / "Real"
+    fake_dir = root / "Deepfake"
+    real_dir.mkdir(parents=True)
+    fake_dir.mkdir(parents=True)
+    for i in range(n_real):
+        (real_dir / f"real_{i}.jpg").write_bytes(b"")
+    for i in range(n_fake):
+        (fake_dir / f"fake_{i}.jpg").write_bytes(b"")
+    return root
 
 
 @pytest.fixture
-def captured_split(monkeypatch, tmp_path):
-    """Run the splitter against a synthetic CSV and capture the written DataFrame.
+def run_split(tmp_path):
+    """Build a 20-image dataset and return a callable that runs the splitter.
 
-    Points ``glob.glob`` at a fabricated ``FINAL_DATASET.csv`` and replaces
-    ``DataFrame.to_csv`` with a capturing stub, so calling the splitter never
-    writes into the repository. Returns a callable that runs the split for a
-    given seed and hands back the captured output DataFrame.
+    The callable runs ``create_split`` for a given seed, writing the manifest to
+    a tmp path, and returns the resulting DataFrame. Exposes ``n``, ``out_csv``
+    and ``data_dir`` for assertions.
     """
-    csv_path = tmp_path / "FINAL_DATASET.csv"
-    n_valid = _write_dataset_csv(csv_path)
-
-    # The loader resolves the dataset via glob; point it at our temp file.
-    monkeypatch.setattr(cs.glob, "glob", lambda *a, **k: [str(csv_path)])
-
-    captured = {}
-
-    def fake_to_csv(self, path, *args, **kwargs):
-        # Capture a copy of the frame the splitter intended to persist.
-        captured["df"] = self.copy()
-        captured["path"] = path
-
-    monkeypatch.setattr(cs.pd.DataFrame, "to_csv", fake_to_csv, raising=True)
+    n_real, n_fake = 10, 10
+    data_dir = _make_dataset_tree(tmp_path / "data", n_real, n_fake)
+    out_csv = tmp_path / "out" / "dataset_split.csv"
 
     def run(seed: int = 42):
-        cs.create_train_val_test_split(seed=seed)
-        return captured["df"]
+        return cs.create_split(data_dir=data_dir, output_csv=out_csv, seed=seed)
 
-    run.n_valid = n_valid
+    run.n = n_real + n_fake
+    run.out_csv = out_csv
+    run.data_dir = data_dir
     return run
 
 
+# ===========================================================================
+# 1. Error handling
+# ===========================================================================
+
 class TestCreateSplitErrors:
-    """Failure modes of dataset resolution."""
+    """Failure modes when the dataset layout is missing."""
 
-    def test_missing_dataset_raises_filenotfound(self, monkeypatch):
-        """A missing ``FINAL_DATASET.csv`` raises ``FileNotFoundError``.
-
-        Edge case: with no dataset on disk the glob returns nothing, so the
-        splitter must fail loudly (pointing the user at ``downloaddataset.py``)
-        rather than proceeding on empty data.
-        """
-        # Arrange: glob finds no dataset file.
-        monkeypatch.setattr(cs.glob, "glob", lambda *a, **k: [])
-        # Act + Assert
+    def test_missing_data_dir_raises_filenotfound(self, tmp_path):
+        """A non-existent dataset directory raises ``FileNotFoundError``."""
         with pytest.raises(FileNotFoundError):
-            cs.create_train_val_test_split(seed=42)
+            cs.create_split(
+                data_dir=tmp_path / "does_not_exist",
+                output_csv=tmp_path / "out.csv",
+            )
 
+    def test_missing_class_subfolder_raises_filenotfound(self, tmp_path):
+        """A dataset dir missing the Deepfake/ subfolder raises ``FileNotFoundError``.
 
-class TestCreateSplitLogic:
-    """The split proportions, column selection, row cleaning and determinism."""
-
-    def test_output_has_only_expected_columns(self, captured_split):
-        """The written frame keeps exactly image_url, label_numeric, data_split.
-
-        The extra ``label_text`` column in the source must be dropped — only the
-        two needed columns plus the assigned split are persisted.
+        Edge case: the directory exists but its expected class layout is
+        incomplete, so the splitter must fail loudly rather than emit a manifest
+        covering only one class.
         """
-        # Act
-        df = captured_split()
-        # Assert
-        assert list(df.columns) == ["image_url", "label_numeric", "data_split"]
+        # Arrange: only the Real/ subfolder is present.
+        (tmp_path / "data" / "Real").mkdir(parents=True)
+        with pytest.raises(FileNotFoundError):
+            cs.create_split(
+                data_dir=tmp_path / "data",
+                output_csv=tmp_path / "out.csv",
+            )
 
-    def test_invalid_rows_are_dropped(self, captured_split):
-        """Rows missing a URL or label are removed before splitting.
 
-        Edge case: the two malformed source rows must not reach the output, so
-        the row count equals the number of valid rows only.
+# ===========================================================================
+# 2. Manifest content & labelling
+# ===========================================================================
+
+class TestManifestContent:
+    """Columns, labelling, path format and image coverage of the manifest."""
+
+    def test_output_has_exactly_the_expected_columns(self, run_split):
+        """The manifest carries exactly photo_name, photo_path, label, split."""
+        df = run_split()
+        assert list(df.columns) == ["photo_name", "photo_path", "label", "split"]
+
+    def test_all_images_are_included(self, run_split):
+        """Every ``.jpg`` under both class folders appears exactly once."""
+        df = run_split()
+        assert len(df) == run_split.n
+
+    def test_labels_match_class_folders(self, run_split):
+        """Real images get label 0 and Deepfake images get label 1.
+
+        The label is derived purely from the source subfolder, so each
+        ``real_*`` file must be 0 and each ``fake_*`` file must be 1.
         """
-        # Act
-        df = captured_split()
-        # Assert: only the valid rows survive dropna.
-        assert len(df) == captured_split.n_valid
+        df = run_split().set_index("photo_name")
+        # Real folder -> 0
+        assert (df.loc[[f"real_{i}.jpg" for i in range(10)], "label"] == 0).all()
+        # Deepfake folder -> 1
+        assert (df.loc[[f"fake_{i}.jpg" for i in range(10)], "label"] == 1).all()
 
-    def test_split_proportions_are_70_15_15(self, captured_split):
-        """The split sizes follow the documented 70/15/15 partition.
+    def test_photo_path_uses_forward_slashes_and_ends_with_name(self, run_split):
+        """``photo_path`` is forward-slashed and ends with its ``photo_name``."""
+        df = run_split()
+        for _, row in df.iterrows():
+            assert "\\" not in row["photo_path"]
+            assert row["photo_path"].endswith(row["photo_name"])
 
-        Every row is assigned exactly one of train/val/test, with counts
-        matching ``int(0.70*n)`` / ``int(0.15*n)`` / remainder.
-        """
-        # Act
-        df = captured_split()
-        n = captured_split.n_valid
-        counts = df["data_split"].value_counts().to_dict()
-        # Assert: each partition has its expected size and they sum to n.
+    def test_manifest_is_written_to_disk(self, run_split):
+        """The manifest is persisted to ``output_csv`` and reads back identically."""
+        df = run_split()
+        assert run_split.out_csv.is_file()
+        # The on-disk CSV round-trips to the same rows the function returned.
+        from_disk = pd.read_csv(run_split.out_csv)
+        assert len(from_disk) == len(df)
+        assert list(from_disk.columns) == list(df.columns)
+
+
+# ===========================================================================
+# 3. Split proportions & determinism
+# ===========================================================================
+
+class TestSplitLogic:
+    """The 70/15/15 partition sizes, coverage and reproducibility."""
+
+    def test_split_proportions_are_70_15_15(self, run_split):
+        """Split sizes follow int(0.70*n) / int(0.15*n) / remainder."""
+        df = run_split()
+        n = run_split.n
+        counts = df["split"].value_counts().to_dict()
         assert counts.get("train") == int(0.70 * n)
         assert counts.get("val") == int(0.15 * n)
         assert counts.get("test") == n - int(0.70 * n) - int(0.15 * n)
         assert sum(counts.values()) == n
 
-    def test_every_row_is_assigned_a_known_split(self, captured_split):
-        """No row is left with an empty/unknown split label.
+    def test_every_row_is_assigned_a_known_split(self, run_split):
+        """Only the three valid split labels appear; no row is left unassigned."""
+        df = run_split()
+        assert set(df["split"]) == {"train", "val", "test"}
 
-        Guards against an off-by-one in the index partitioning that would leave
-        a row with the initial empty-string placeholder.
-        """
-        # Act
-        df = captured_split()
-        # Assert: the only labels present are the three valid splits.
-        assert set(df["data_split"]) == {"train", "val", "test"}
-
-    def test_split_is_deterministic_for_fixed_seed(self, captured_split):
-        """The same seed produces an identical split assignment across runs.
-
-        Reproducibility is the whole point of the seeded shuffle: two runs with
-        seed 42 must assign every row to the same split.
-        """
-        # Act: run the split twice with the same seed.
-        first = captured_split(seed=42)["data_split"].tolist()
-        second = captured_split(seed=42)["data_split"].tolist()
-        # Assert: identical assignments.
+    def test_split_is_deterministic_for_fixed_seed(self, run_split):
+        """The same seed produces an identical split assignment across runs."""
+        first = run_split(seed=42).sort_values("photo_name")["split"].tolist()
+        second = run_split(seed=42).sort_values("photo_name")["split"].tolist()
         assert first == second
 
-    def test_different_seeds_can_change_assignment(self, captured_split):
-        """Different seeds generally yield a different shuffle.
-
-        Confirms the seed actually drives the shuffle (not ignored): two
-        distinct seeds must not produce the identical assignment for a
-        reasonably sized dataset.
-        """
-        # Act
-        first = captured_split(seed=1)["data_split"].tolist()
-        second = captured_split(seed=2)["data_split"].tolist()
-        # Assert: the seed influences the partitioning.
+    def test_different_seeds_can_change_assignment(self, run_split):
+        """Two distinct seeds yield a different per-photo split assignment."""
+        first = run_split(seed=1).sort_values("photo_name")["split"].tolist()
+        second = run_split(seed=2).sort_values("photo_name")["split"].tolist()
         assert first != second
