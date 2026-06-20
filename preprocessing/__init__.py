@@ -39,6 +39,7 @@ explicit and there is exactly one hop from this file to the real implementation:
     reduce_noise               preprocessing/transforms.py   Per-image: denoising filters
     vectorize_image            preprocessing/vectorize.py    Per-image: image -> 1D vector (optional)
     reduce_dimensions          preprocessing/reduce.py       Batch-level: vector / matrix / bypass
+    standardize_features       preprocessing/scale.py        Batch-level: per-feature standardize
     ImagePipeline              preprocessing/pipeline.py     Config-driven op chain
     batch_process              preprocessing/pipeline.py     Run a pipeline over many images
     compose                    preprocessing/pipeline.py     Right-to-left functional compose
@@ -93,12 +94,14 @@ Vectorize is optional:
     method, which compresses the matrix while preserving its row structure.
 
 Per-image vs batch-level routing (important):
-    Every transform except ``'reduce'`` operates on a single image. ``'reduce'``
-    needs the whole batch to fit, so:
+    Every transform except the batch-level ``'reduce'`` (PCA/JL projection) and
+    ``'scale'`` (per-feature standardization) steps operates on a single image.
+    Those two need the whole batch to fit, so:
       * ``pipeline.process(image)`` treats ``('reduce', {'method': None})`` as a
-        no-op. For a fitting method on a lone image it raises a helpful
+        no-op. For a fitting batch-level step on a lone image it raises a helpful
         ``ValueError`` *unless the pipeline has already been fitted* (via
-        ``fit`` / ``fit_transform``), in which case it reuses the stored reducer.
+        ``fit`` / ``fit_transform``), in which case it reuses the stored
+        reducer / scaler.
       * ``batch_process(images, pipeline)`` splits the chain, runs per-image ops
         on each image, stacks the results, then fits a fresh reducer once over
         the full batch. Use this for a one-shot batch transform.
@@ -141,6 +144,9 @@ from preprocessing.vectorize import vectorize_image
 # --- Batch-level dimensionality reduction ......... preprocessing/reduce.py
 from preprocessing.reduce import reduce_dimensions
 
+# --- Batch-level feature standardization .......... preprocessing/scale.py
+from preprocessing.scale import standardize_features
+
 # --- Pipeline composition & batching .............. preprocessing/pipeline.py
 from preprocessing.pipeline import (
     BATCH_LEVEL_OPS,
@@ -180,6 +186,8 @@ __all__ = [
     'vectorize_image',
     # reduce (batch-level)
     'reduce_dimensions',
+    # scale (batch-level)
+    'standardize_features',
     # pipeline / composition
     'ImagePipeline',
     'batch_process',

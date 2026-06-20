@@ -23,13 +23,15 @@ matrix methods reduce image matrices (see :func:`reduce_dimensions`).
 Per-image vs batch-level operations
 -----------------------------------
 All transforms (grayscale, resize, denoise, normalize, vectorize) act on a
-single image. The ``'reduce'`` step acts on a *batch* — it needs multiple
+single image. The batch-level steps — ``'reduce'`` (PCA/JL projection) and
+``'scale'`` (per-feature standardization) — act on a *batch*: they need multiple
 samples to fit:
 
 - ``ImagePipeline.process(image)`` runs every per-image op and treats
-  ``'reduce'`` with ``method=None`` as a no-op. With a fitting method it raises
-  a helpful ``ValueError`` (a reducer cannot be fit on one sample) unless the op
-  kwargs include a pre-fit ``reducer``.
+  ``'reduce'`` with ``method=None`` as a no-op. With a fitting batch-level step
+  (``'reduce'`` or ``'scale'``) it raises a helpful ``ValueError`` (these cannot
+  be fit on one sample) unless the pipeline has already been fitted (then the
+  stored statistics are reused).
 - ``batch_process(images, pipeline)`` splits the pipeline into per-image and
   batch-level segments, runs the per-image segment on each image, stacks the
   results — into ``(n_samples, n_features)`` when vectorized, or a matrix stack
@@ -45,11 +47,13 @@ import numpy as np
 from .transforms import normalize_image, reduce_noise, resize_image, to_grayscale
 from .vectorize import vectorize_image
 from .reduce import reduce_dimensions
+from .scale import standardize_features
 
 # Pipeline operations that act on a *batch* of feature vectors rather than a
 # single image. Used by ImagePipeline / batch_process to know where to split
-# the chain. Keep this set small and explicit.
-BATCH_LEVEL_OPS = frozenset({'reduce'})
+# the chain. Both learn statistics across samples (a projection for 'reduce',
+# per-feature mean/std for 'scale'). Keep this set small and explicit.
+BATCH_LEVEL_OPS = frozenset({'reduce', 'scale'})
 
 
 class ImagePipeline:
@@ -75,6 +79,11 @@ class ImagePipeline:
           *batch-level* op and is only meaningful inside :func:`batch_process`;
           on a single image it is a no-op for ``method=None`` and an error for
           the fitting methods (they require multiple samples to fit).
+        - ``'scale'`` — Optional per-feature standardization
+          (:func:`standardize_features`). A *batch-level* op that subtracts the
+          per-feature mean and divides by the per-feature std, fit on the batch
+          and reused across splits. Place it after ``'vectorize'`` / ``'reduce'``
+          to condition the flat features for a scale-sensitive classifier (SVM).
 
     Reusing a fitted reduction across splits:
         For a train/val/test workflow, use the scikit-learn-style
@@ -121,6 +130,7 @@ class ImagePipeline:
         'grayscale': to_grayscale,
         'denoise': reduce_noise,
         'reduce': reduce_dimensions,
+        'scale': standardize_features,
     }
 
     def __init__(self, operations: List[Tuple[str, Dict[str, Any]]]):
@@ -449,10 +459,11 @@ def batch_process(
        ``(n_images, n_features)`` matrix; without it each image stays a matrix,
        so the stack is ``(n_images, height, width)`` for grayscale or
        ``(n_images, height, width, channels)`` for colour input.
-    2. **Batch-level** ops — currently only ``'reduce'`` — are then applied
-       once to that stack. This is where the reducer is fit (it needs multiple
-       samples to be meaningful). Vector ``'reduce'`` methods consume the 2D
-       matrix; matrix methods consume the 3D/4D image stack.
+    2. **Batch-level** ops — ``'reduce'`` and/or ``'scale'`` — are then applied
+       once to that stack, in order. This is where the reducer / scaler is fit
+       (each needs multiple samples to be meaningful). Vector ``'reduce'``
+       methods and ``'scale'`` consume the 2D matrix; matrix ``'reduce'`` methods
+       consume the 3D/4D image stack.
 
     For pipelines without any batch-level ops, this is equivalent to calling
     ``pipeline.process`` on each image and stacking the results.

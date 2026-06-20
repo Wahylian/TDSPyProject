@@ -22,12 +22,13 @@ class TestPublicApiSurface:
         unintentionally, and a name being listed in ``__all__`` without a
         backing attribute (which would break ``from preprocessing import *``).
         """
-        # Arrange: the 14 names the package promises in __all__.
+        # Arrange: the 15 names the package promises in __all__.
         expected = {
             "to_grayscale", "resize_image", "normalize_image", "reduce_noise",
-            "vectorize_image", "reduce_dimensions", "ImagePipeline",
-            "batch_process", "compose", "pipeline_decorator", "BATCH_LEVEL_OPS",
-            "load_image_from_bytes", "load_image_from_file", "load_image_from_pil",
+            "vectorize_image", "reduce_dimensions", "standardize_features",
+            "ImagePipeline", "batch_process", "compose", "pipeline_decorator",
+            "BATCH_LEVEL_OPS", "load_image_from_bytes", "load_image_from_file",
+            "load_image_from_pil",
         }
         # Act
         published = set(ip.__all__)

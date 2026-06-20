@@ -24,6 +24,7 @@ from preprocessing import (
     pipeline_decorator,
     reduce_dimensions,
     resize_image,
+    standardize_features,
     to_grayscale,
     vectorize_image,
 )
@@ -520,3 +521,124 @@ class TestFitTransform:
         assert X_train.shape == (len(image_batch), 16, 5, 3)
         assert X_val.shape == (3, 16, 5, 3)
         assert single.shape == (16, 5, 3)
+
+
+class TestScale:
+    """The batch-level ``'scale'`` step inside a pipeline.
+
+    ``'scale'`` (per-feature standardization) plugs into the same batch-op
+    machinery as ``'reduce'``: it is split out as batch-level, fit once on the
+    training batch via ``fit_transform``, and its stored statistics are reused by
+    ``transform`` and single-image ``process``. These tests pin that wiring and
+    the common ``reduce`` -> ``scale`` chaining used before an SVM.
+    """
+
+    def _scale_pipeline(self) -> ImagePipeline:
+        """A vectorized pipeline ending in a batch-level scale (op index 3)."""
+        return ImagePipeline([
+            ("grayscale", {}),
+            ("resize", {"target_size": (16, 16)}),
+            ("vectorize", {}),
+            ("scale", {}),
+        ])
+
+    def test_scale_is_classified_as_batch_level(self):
+        """``'scale'`` is partitioned as a batch-level op, like ``'reduce'``."""
+        # Arrange
+        pipeline = self._scale_pipeline()
+        # Act
+        per_image = [n for n, _ in pipeline.per_image_operations()]
+        batch = [n for n, _ in pipeline.batch_operations()]
+        # Assert: pixel ops stay per-image; scale runs on the batch.
+        assert per_image == ["grayscale", "resize", "vectorize"]
+        assert batch == ["scale"]
+
+    def test_fit_transform_standardizes_train_columns(self, image_batch):
+        """``fit_transform`` standardizes the train batch to ~zero-mean/unit-var."""
+        # Arrange
+        pipeline = self._scale_pipeline()
+        # Act
+        X_train = pipeline.fit_transform(image_batch)
+        # Assert: full H*W width kept, columns standardized.
+        assert X_train.shape == (len(image_batch), 16 * 16)
+        assert np.allclose(X_train.mean(axis=0), 0.0, atol=1e-4)
+        # Columns that vary become unit-variance; constant columns stay at 0.
+        std = X_train.std(axis=0)
+        varying = std > 1e-6
+        assert np.allclose(std[varying], 1.0, atol=1e-4)
+
+    def test_transform_applies_training_stats(self, image_batch):
+        """``transform`` reuses the *stored training* scaler, not a fresh fit.
+
+        White-box: standardizing a held-out batch through the scaler stored at
+        fit time reproduces ``transform``'s output — so the train stats are
+        applied, not stats refit on the held-out data.
+        """
+        # Arrange: fit on the full batch, hold out a slice. Scale is op index 3.
+        pipeline = self._scale_pipeline()
+        pipeline.fit(image_batch)
+        held_out = image_batch[:4]
+        scaler = pipeline._fitted[3]
+        # Act: pipeline transform vs. manual apply via the stored scaler.
+        got = pipeline.transform(held_out)
+        per_image = pipeline._apply_per_image_ops(held_out)
+        expected = standardize_features(per_image, reducer=scaler)
+        # Assert: identical — the same (training) statistics were applied.
+        np.testing.assert_allclose(got, expected)
+
+    def test_transform_before_fit_raises(self, image_batch):
+        """Calling ``transform`` before fitting a scale stage raises."""
+        # Arrange
+        pipeline = self._scale_pipeline()
+        # Act + Assert
+        with pytest.raises(RuntimeError):
+            pipeline.transform(image_batch)
+
+    def test_process_single_image_after_fit_uses_stats(self, image_batch):
+        """After fitting, single-image ``process`` reuses the stored scaler.
+
+        The single-image path must match the corresponding row of a batch
+        ``transform``, confirming both share the stored statistics.
+        """
+        # Arrange
+        pipeline = self._scale_pipeline()
+        pipeline.fit(image_batch)
+        # Act
+        single = pipeline.process(image_batch[0])
+        batched = pipeline.transform([image_batch[0]])
+        # Assert: 1D vector, consistent across single and batch paths.
+        assert single.shape == (16 * 16,)
+        np.testing.assert_allclose(single, batched[0])
+
+    def test_reduce_then_scale_chain(self, image_batch):
+        """A ``reduce`` -> ``scale`` chain fits both and reuses both across splits.
+
+        The end-to-end SVM front-end: PCA collapses the width to ``n_components``,
+        then scale standardizes those components. ``fit_transform`` learns both on
+        train (op indices 3 and 4), ``transform`` reuses both on held-out data,
+        and single-image ``process`` agrees with the batch path.
+        """
+        # Arrange: grayscale->resize->vectorize->reduce(vec-pca)->scale.
+        pipeline = ImagePipeline([
+            ("grayscale", {}),
+            ("resize", {"target_size": (16, 16)}),
+            ("vectorize", {}),
+            ("reduce", {"method": "vec-pca", "n_components": 3}),
+            ("scale", {}),
+        ])
+        held_out = image_batch[:4]
+        # Act
+        X_train = pipeline.fit_transform(image_batch)
+        X_val = pipeline.transform(held_out)
+        single = pipeline.process(held_out[0])
+        # Assert: reduced to 3 dims and standardized; shapes consistent.
+        assert X_train.shape == (len(image_batch), 3)
+        assert X_val.shape == (4, 3)
+        assert single.shape == (3,)
+        assert np.allclose(X_train.mean(axis=0), 0.0, atol=1e-4)
+        # Single-image consistency: compare against a *batch-of-one* transform,
+        # not X_val[0]. sklearn PCA's transform takes a batch-size-dependent BLAS
+        # path, so a 1-image vs 4-image batch differ by ~1e-5 in float32 — and the
+        # trailing scale step (dividing by a small per-component std) amplifies it.
+        # A batch of exactly one matches the single-image path exactly.
+        np.testing.assert_allclose(single, pipeline.transform([held_out[0]])[0])

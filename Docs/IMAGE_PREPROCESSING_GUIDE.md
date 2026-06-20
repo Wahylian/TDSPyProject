@@ -25,6 +25,7 @@ TDSPyProject/
     ├── transforms.py             # to_grayscale, resize_image, normalize_image, reduce_noise
     ├── vectorize.py              # vectorize_image (flat + VGG16) — optional step
     ├── reduce.py                 # reduce_dimensions (vector + matrix subgroups, + bypass)
+    ├── scale.py                  # standardize_features (per-feature zero-mean / unit-variance)
     ├── pipeline.py               # ImagePipeline, batch_process, compose, pipeline_decorator
     └── io.py                     # load_image_from_{bytes,file,pil}
 ```
@@ -48,14 +49,16 @@ The pipeline distinguishes two kinds of operations:
 | Kind | Examples | Applied by |
 |------|----------|------------|
 | **Per-image** | `grayscale`, `resize`, `denoise`, `normalize`, `vectorize` | `ImagePipeline.process(image)` — runs on each image independently |
-| **Batch-level** | `reduce` (`vec-*` / `mat-*`) | `batch_process(images, pipeline)` — runs once on the stacked batch |
+| **Batch-level** | `reduce` (`vec-*` / `mat-*`), `scale` | `batch_process(images, pipeline)` — runs once on the stacked batch |
 
 `batch_process` splits a pipeline into its per-image and batch-level segments, applies the per-image ops to each image, and stacks the results. **Vectorization is optional** and decides the stacked shape:
 
 - **With** a `'vectorize'` step, each image is a 1D vector, so the stack is a `(n_samples, n_features)` matrix → pair with a **vector** reduce method (`vec-pca` / `vec-jl`).
 - **Without** `'vectorize'`, each image stays a matrix, so the stack is a `(n_samples, height, width)` grayscale stack (or `(n_samples, height, width, channels)` if `'grayscale'` is also omitted) → pair with a **matrix** reduce method (`mat-pca` / `mat-jl`), which preserves the channel axis.
 
-The batch-level `'reduce'` op (if present) then runs once on that stack. Pipelines with no `'reduce'` step simply return the stacked vectors or matrices.
+The batch-level ops then run once on that stack, in order: `'reduce'` (if present) projects it, and `'scale'` (if present) standardizes the resulting flat features per column. Pipelines with neither simply return the stacked vectors or matrices.
+
+Both batch-level ops **learn statistics across samples** (a projection for `reduce`, per-feature mean/std for `scale`), so for a train/val/test split fit them once on train and reuse them — use `ImagePipeline.fit_transform(train)` then `ImagePipeline.transform(val/test)` (see **Train/test correctness** under `reduce_dimensions()`), since `batch_process` refits on every call.
 
 ---
 
@@ -419,6 +422,31 @@ X_train, reducer = reduce_dimensions(
 )
 X_test = reduce_dimensions(X_test_raw, reducer=reducer)
 ```
+
+The same fit-on-train/reuse rule applies to the `'scale'` step (`standardize_features`),
+which standardizes flat features per column for scale-sensitive models (e.g. SVM).
+When a pipeline chains both — `… → ('reduce', …) → ('scale', {})` — the cleanest
+way to honour the rule for *both* at once is the pipeline's own
+`fit_transform` / `transform` pair, which fits every batch-level op on train and
+reuses each on held-out data:
+
+```python
+pipeline = ImagePipeline([
+    ('grayscale', {}),
+    ('resize', {'target_size': (128, 128)}),
+    ('normalize', {'method': 'minmax'}),
+    ('vectorize', {}),
+    ('reduce', {'method': 'vec-pca', 'n_components': 128, 'random_state': 42}),
+    ('scale', {}),                       # zero-mean / unit-variance per feature
+])
+X_train = pipeline.fit_transform(train_images)   # fits PCA + scaler on train
+X_val   = pipeline.transform(val_images)         # reuses both
+X_test  = pipeline.transform(test_images)        # reuses both
+```
+
+Note `'scale'` (per-feature, across the dataset, after `reduce`) is distinct from
+the per-image `normalize` step (within one image, before `vectorize`): they act on
+different axes and are complementary, not redundant.
 
 ---
 
@@ -794,6 +822,7 @@ batch-level split, and the composition patterns.
 | `to_grayscale()` | Convert to grayscale | np.ndarray (2D) | `preprocessing.transforms` |
 | `reduce_noise()` | Denoise image | np.ndarray (denoised) | `preprocessing.transforms` |
 | `reduce_dimensions()` | Reduce features — vector (`vec-pca`/`vec-jl`), matrix (`mat-pca`/`mat-jl`), or `None` bypass | np.ndarray, or (np.ndarray, reducer) | `preprocessing.reduce` |
+| `standardize_features()` | Standardize flat features per column (zero-mean / unit-variance), fit-once/reuse | np.ndarray, or (np.ndarray, scaler) | `preprocessing.scale` |
 | `compose()` | Functional composition | Callable | `preprocessing.pipeline` |
 | `pipeline_decorator()` | Decorator for pipelines | Callable (decorator) | `preprocessing.pipeline` |
 | `batch_process()` | Process multiple images (and apply batch-level reduce) | np.ndarray (batch) | `preprocessing.pipeline` |
@@ -818,12 +847,18 @@ help(ImagePipeline.process)
 
 ---
 
-**Version:** 1.4  
-**Last Updated:** 2026-06-17  
+**Version:** 1.6  
+**Last Updated:** 2026-06-20  
 **Production Ready:** ✅
 
 ### Changelog
 
+- **1.6 (2026-06-20)** — Added a batch-level `'scale'` step (`standardize_features`,
+  pure NumPy) that standardizes flat features per column (zero-mean / unit-variance),
+  fit on train and reused on val/test via the same fit-once/reuse protocol as
+  `reduce_dimensions`. Chain it after `'reduce'` (`… → ('reduce', …) → ('scale', {})`)
+  to condition features for scale-sensitive models (e.g. SVM) inside the pipeline,
+  rather than with a separate scikit-learn `StandardScaler`.
 - **1.5 (2026-06-17)** — The `preprocessing/` package `__init__.py` is now the
   single public API. The standalone `image_preprocessing.py` facade was removed;
   `__all__` and all re-exports moved into the package, so callers import directly
