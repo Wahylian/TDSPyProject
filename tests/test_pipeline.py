@@ -22,6 +22,7 @@ from preprocessing import (
     compose,
     normalize_image,
     pipeline_decorator,
+    reduce_dimensions,
     resize_image,
     to_grayscale,
     vectorize_image,
@@ -364,3 +365,158 @@ class TestBatchProcess:
         out = batch_process(image_batch, pipeline)
         # Assert: width reduced to 5, the 3 colour channels preserved.
         assert out.shape == (len(image_batch), 16, 5, 3)
+
+
+class TestFitTransform:
+    """Stateful fit/transform: a fitted reducer is stored and reused.
+
+    This is the workflow that makes the batch-level ``reduce`` step usable across
+    a train/val/test split — the PCA/JL basis is learned once on the training
+    batch and reapplied to held-out data, instead of being refit per call as
+    ``batch_process`` does.
+    """
+
+    def _pca_pipeline(self) -> ImagePipeline:
+        """A vectorized pipeline ending in a batch-level PCA reduce (op index 3)."""
+        return ImagePipeline([
+            ("grayscale", {}),
+            ("resize", {"target_size": (16, 16)}),
+            ("vectorize", {}),
+            ("reduce", {"method": "vec-pca", "n_components": 3}),
+        ])
+
+    def test_fit_transform_then_transform_shapes(self, image_batch):
+        """``fit_transform`` reduces the train batch; ``transform`` reduces others.
+
+        Both collapse the feature width to ``n_components``; the held-out batch
+        can be a different size than the one fit on.
+        """
+        # Arrange
+        pipeline = self._pca_pipeline()
+        # Act
+        X_train = pipeline.fit_transform(image_batch)
+        X_val = pipeline.transform(image_batch[:4])
+        # Assert: width reduced to n_components for both splits.
+        assert X_train.shape == (len(image_batch), 3)
+        assert X_val.shape == (4, 3)
+
+    def test_transform_applies_training_basis(self, image_batch):
+        """``transform`` reuses the *stored training* reducer, not a fresh fit.
+
+        Proven white-box: projecting a held-out batch through the reducer stored
+        at fit time reproduces ``transform``'s output exactly — so the basis is
+        the training basis, not one refit on the held-out data.
+        """
+        # Arrange: fit on the full batch, hold out a slice.
+        pipeline = self._pca_pipeline()
+        pipeline.fit(image_batch)
+        held_out = image_batch[:4]
+        # The reduce op is index 3; grab the reducer fitted on the train batch.
+        fitted_reducer = pipeline._fitted[3]
+        # Act: transform via the pipeline vs. manually via the stored reducer.
+        got = pipeline.transform(held_out)
+        per_image = pipeline._apply_per_image_ops(held_out)
+        expected = reduce_dimensions(per_image, reducer=fitted_reducer)
+        # Assert: identical — the same (training) projection was applied.
+        np.testing.assert_allclose(got, expected)
+
+    def test_transform_before_fit_raises(self, image_batch):
+        """Calling ``transform`` before fitting a reduce stage raises.
+
+        The batch-level reducer has no stored projection yet, so transform must
+        fail loudly rather than silently refitting.
+        """
+        # Arrange
+        pipeline = self._pca_pipeline()
+        # Act + Assert
+        with pytest.raises(RuntimeError):
+            pipeline.transform(image_batch)
+
+    def test_process_single_image_after_fit_uses_reducer(self, image_batch):
+        """After fitting, single-image ``process`` reuses the reducer (no error).
+
+        The same single-image PCA call that raises on an unfitted pipeline now
+        succeeds, and matches the corresponding row of a batch ``transform`` —
+        confirming both single-image and batch paths share the stored basis.
+        """
+        # Arrange
+        pipeline = self._pca_pipeline()
+        pipeline.fit(image_batch)
+        # Act: single-image process vs. the matching row of a batch transform.
+        single = pipeline.process(image_batch[0])
+        batched = pipeline.transform([image_batch[0]])
+        # Assert: reduced to n_components, and consistent across both paths.
+        assert single.shape == (3,)
+        np.testing.assert_allclose(single, batched[0])
+
+    def test_fit_transform_without_reduce_returns_stacked(self, image_batch):
+        """With no batch-level op, ``fit_transform`` just stacks per-image vectors.
+
+        The fit/transform surface stays usable on a plain per-image pipeline:
+        nothing to fit, so it behaves like stacking ``process`` outputs.
+        """
+        # Arrange: a per-image-only pipeline (no reduce).
+        pipeline = ImagePipeline([
+            ("grayscale", {}),
+            ("resize", {"target_size": (16, 16)}),
+            ("vectorize", {}),
+        ])
+        # Act
+        out = pipeline.fit_transform(image_batch)
+        # Assert: one row per image, full H*W width (no reduction applied).
+        assert out.shape == (len(image_batch), 16 * 16)
+
+    @pytest.mark.parametrize("method", ["mat-pca", "mat-jl"])
+    def test_matrix_reduce_fit_transform_reuse(self, image_batch, method):
+        """Matrix reducers fit/transform and reuse the basis, like the vector ones.
+
+        The fit/transform surface is method-agnostic: a grayscale matrix pipeline
+        (no ``vectorize``) collapses the width axis to ``n_components`` while
+        keeping the row axis, ``transform`` reuses the training projection, and
+        single-image ``process`` keeps each image a 2D ``(height, k)`` matrix.
+        """
+        # Arrange: matrix pipeline (no vectorize); reduce is op index 3.
+        pipeline = ImagePipeline([
+            ("grayscale", {}),
+            ("resize", {"target_size": (16, 16)}),
+            ("normalize", {"method": "minmax"}),
+            ("reduce", {"method": method, "n_components": 4}),
+        ])
+        held_out = image_batch[:3]
+        # Act
+        X_train = pipeline.fit_transform(image_batch)
+        X_val = pipeline.transform(held_out)
+        single = pipeline.process(held_out[0])
+        # Reuse check: stored reducer reproduces transform's output.
+        expected = reduce_dimensions(
+            pipeline._apply_per_image_ops(held_out), reducer=pipeline._fitted[3]
+        )
+        # Assert: row axis (16) kept, width reduced to 4; basis reused; single
+        # image stays a 2D matrix consistent with the batch path.
+        assert X_train.shape == (len(image_batch), 16, 4)
+        assert X_val.shape == (3, 16, 4)
+        assert single.shape == (16, 4)
+        np.testing.assert_allclose(X_val, expected)
+
+    def test_colour_matrix_reduce_preserves_channels_on_transform(self, image_batch):
+        """A colour matrix pipeline keeps the channel axis through fit/transform.
+
+        With neither ``grayscale`` nor ``vectorize``, each image stays
+        ``(height, width, 3)``; the matrix reducer narrows only the width axis,
+        so the channel axis survives in fit_transform, transform, and the
+        single-image ``process`` path alike.
+        """
+        # Arrange: keep colour — resize + normalize, then a matrix reduce.
+        pipeline = ImagePipeline([
+            ("resize", {"target_size": (16, 16)}),
+            ("normalize", {"method": "minmax"}),
+            ("reduce", {"method": "mat-pca", "n_components": 5}),
+        ])
+        # Act
+        X_train = pipeline.fit_transform(image_batch)
+        X_val = pipeline.transform(image_batch[:3])
+        single = pipeline.process(image_batch[0])
+        # Assert: width -> 5, the 3 colour channels preserved everywhere.
+        assert X_train.shape == (len(image_batch), 16, 5, 3)
+        assert X_val.shape == (3, 16, 5, 3)
+        assert single.shape == (16, 5, 3)

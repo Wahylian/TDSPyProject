@@ -143,6 +143,63 @@ def extract_features_batch(
     return features
 
 
+def extract_train_eval_features(
+    train_images: List[np.ndarray],
+    eval_images: List[np.ndarray],
+    pipeline: ImagePipeline,
+    verbose: bool = True,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Extract features for a train/eval split sharing one fitted reducer.
+
+    When the pipeline ends in a *fitting* ``'reduce'`` step (``vec-pca`` /
+    ``vec-jl`` / ``mat-pca`` / ``mat-jl``), the projection must be learned on the
+    training data and then reused unchanged on the held-out split — otherwise the
+    two splits land in different feature spaces and the model sees inconsistent
+    inputs. ``batch_process`` cannot do this: it refits a fresh reducer on every
+    call. The pipeline's scikit-learn-style ``fit_transform`` / ``transform``
+    pair is the right tool:
+
+        * ``fit_transform(train_images)`` fits the reducer on train and returns
+          the reduced train features, storing the fitted projection on the
+          pipeline.
+        * ``transform(eval_images)`` reuses that same projection (and so would
+          ``pipeline.process(single_image)`` afterwards).
+
+    For a pipeline *without* a ``'reduce'`` step this still works — it simply
+    stacks the per-image vectors, with nothing to fit.
+
+    Args:
+        train_images: Images used to fit the reducer.
+        eval_images: Held-out images (val/test) to project with the train basis.
+        pipeline: ImagePipeline instance, typically ending in a ``'reduce'`` step.
+        verbose: Print progress.
+
+    Returns:
+        ``(X_train, X_eval)`` feature matrices sharing the same feature space.
+
+    Example:
+        >>> from prebuilt_pipelines import PrebuiltPipelines
+        >>> pipeline = PrebuiltPipelines.vec_pca_pipeline(n_components=64)
+        >>> X_train, X_test = extract_train_eval_features(train_imgs, test_imgs, pipeline)
+        >>> X_train.shape[1] == X_test.shape[1]  # same 64-d space
+        True
+    """
+    if verbose:
+        print(f"Fitting pipeline on {len(train_images)} train images...")
+    # Learn the (optional) reducer on train and reduce the train features.
+    X_train = pipeline.fit_transform(train_images)
+
+    if verbose:
+        print(f"Transforming {len(eval_images)} eval images with the train basis...")
+    # Reuse the fitted projection — no refitting on the held-out split.
+    X_eval = pipeline.transform(eval_images)
+
+    if verbose:
+        print(f"  -> train {X_train.shape}, eval {X_eval.shape} "
+              f"(shared {X_train.shape[1:]} feature space)")
+    return X_train, X_eval
+
+
 # ============================================================================
 # PART 3: Training and Evaluation (requires scikit-learn)
 # ============================================================================

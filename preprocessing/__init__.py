@@ -68,11 +68,23 @@ How to use this API
        ])
        features = pipeline.process(img)                  # per-image steps only
 
-3. Run the same pipeline across a batch — this is the only context in which the
-   batch-level ``'reduce'`` step is actually fit::
+3. Run the same pipeline across a batch. ``batch_process`` fits a *fresh*
+   batch-level ``'reduce'`` reducer on the images it is given — handy for a
+   one-shot transform::
 
        from preprocessing import batch_process
        X = batch_process([img] * 200, pipeline)          # (200, n_components)
+
+4. For a train/val/test workflow, fit the ``'reduce'`` projection once on the
+   training batch and reuse it on held-out data with the scikit-learn-style
+   ``fit_transform`` / ``transform`` methods::
+
+       X_train = pipeline.fit_transform(train_images)    # fits PCA/JL on train
+       X_val   = pipeline.transform(val_images)          # reuses the train basis
+       X_test  = pipeline.transform(test_images)         # reuses the train basis
+
+   After fitting, ``pipeline.process(single_image)`` also reuses the stored
+   projection, so single-image inference matches the batched output.
 
 Vectorize is optional:
     Include ``'vectorize'`` to get flat vectors for classical models (SVM,
@@ -84,11 +96,16 @@ Per-image vs batch-level routing (important):
     Every transform except ``'reduce'`` operates on a single image. ``'reduce'``
     needs the whole batch to fit, so:
       * ``pipeline.process(image)`` treats ``('reduce', {'method': None})`` as a
-        no-op and raises a helpful ``ValueError`` for a fitting method on a lone
-        image.
+        no-op. For a fitting method on a lone image it raises a helpful
+        ``ValueError`` *unless the pipeline has already been fitted* (via
+        ``fit`` / ``fit_transform``), in which case it reuses the stored reducer.
       * ``batch_process(images, pipeline)`` splits the chain, runs per-image ops
-        on each image, stacks the results, then fits the reducer once over the
-        full batch. Use this whenever a fitting ``'reduce'`` step is present.
+        on each image, stacks the results, then fits a fresh reducer once over
+        the full batch. Use this for a one-shot batch transform.
+      * ``pipeline.fit_transform(train)`` then ``pipeline.transform(val/test)``
+        fit the reducer once and reuse that same projection across splits — the
+        right choice whenever a fitting ``'reduce'`` step must be consistent
+        across train/val/test (e.g. before training a classifier).
 
 --------------------------------------------------------------------------------
 Requirements
