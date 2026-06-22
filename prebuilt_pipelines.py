@@ -22,6 +22,10 @@ layout.
 
 from preprocessing import ImagePipeline
 
+# A single seed threaded through every random operation (subsampling, PCA, the
+# estimators) so the whole run is reproducible.
+RANDOM_STATE = 42
+
 
 class PrebuiltPipelines:
     """Collection of optimized pipelines for different scenarios."""
@@ -37,7 +41,9 @@ class PrebuiltPipelines:
             ('resize', {'target_size': (128, 128), 'preserve_aspect': True}),
             ('denoise', {'method': 'bilateral', 'kernel_size': 5}),
             ('normalize', {'method': 'minmax', 'value_range': (0.0, 1.0)}),
-            ('vectorize', {'preserve_structure': False})
+            ('vectorize', {'preserve_structure': False}),
+            ("reduce", {"method": "vec-pca", "n_components": 150, "random_state": RANDOM_STATE})
+            
         ])
 
     @staticmethod
