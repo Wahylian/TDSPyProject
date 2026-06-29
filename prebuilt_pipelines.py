@@ -34,7 +34,15 @@ class PrebuiltPipelines:
     def svm_pipeline() -> ImagePipeline:
         """
         Optimized for SVM training: medium resolution, normalized.
-        Output: 16,384 features per image (128x128 grayscale)
+
+        Self-contained feature front-end: the 128x128 grayscale image (16,384
+        raw pixels) is flattened, compressed with PCA to 150 components, and the
+        components are standardized. The trailing ``vec-pca`` + ``scale`` steps
+        are batch-level — they are fit on the training batch (via
+        ``fit_transform``) and reused on val/test — so the emitted features are
+        ready for a scale-sensitive kernel SVM with no further conditioning.
+
+        Output: 150 standardized PCA features per image.
         """
         return ImagePipeline([
             ('grayscale', {}),
@@ -42,29 +50,46 @@ class PrebuiltPipelines:
             ('denoise', {'method': 'bilateral', 'kernel_size': 5}),
             ('normalize', {'method': 'minmax', 'value_range': (0.0, 1.0)}),
             ('vectorize', {'preserve_structure': False}),
-            ("reduce", {"method": "vec-pca", "n_components": 150, "random_state": RANDOM_STATE})
-            
+            ('reduce', {'method': 'vec-pca', 'n_components': 150, 'random_state': RANDOM_STATE}),
+            ('scale', {}),
         ])
 
     @staticmethod
     def fast_pipeline() -> ImagePipeline:
         """
-        Fast training pipeline: low resolution, minimal preprocessing.
-        Output: 4,096 features per image (64x64 grayscale)
+        Fast training pipeline: low resolution, minimal per-image preprocessing.
+
+        Keeps the cheap 64x64 grayscale front-end (4,096 raw pixels) for quick
+        experimentation, then reduces to 150 PCA components and standardizes them
+        so the output drops straight into a scale-sensitive classifier. The
+        ``vec-pca`` + ``scale`` steps are batch-level (fit on train, reused on
+        val/test).
+
+        Output: 150 standardized PCA features per image.
         Best for quick experimentation or when data is limited.
         """
         return ImagePipeline([
             ('grayscale', {}),
             ('resize', {'target_size': (64, 64), 'preserve_aspect': True}),
             ('normalize', {'method': 'minmax'}),
-            ('vectorize', {})
+            ('vectorize', {}),
+            ('reduce', {'method': 'vec-pca', 'n_components': 150, 'random_state': RANDOM_STATE}),
+            ('scale', {}),
         ])
 
     @staticmethod
     def hq_pipeline() -> ImagePipeline:
         """
         High-quality pipeline: high resolution, comprehensive preprocessing.
-        Output: 50,176 features per image (224x224 grayscale)
+
+        The 224x224 grayscale front-end yields 50,176 raw pixels — far too wide
+        to feed a kernel SVM directly — so it is reduced with PCA to 300
+        components (more than the lower-resolution pipelines, to retain detail
+        befitting the "accuracy critical" intent) and then standardized. The
+        ``vec-pca`` + ``scale`` steps are batch-level (fit on train, reused on
+        val/test).
+
+        Output: 300 standardized PCA features per image.
         Best when accuracy is critical and computation time is not.
         """
         return ImagePipeline([
@@ -72,17 +97,29 @@ class PrebuiltPipelines:
             ('resize', {'target_size': (224, 224), 'preserve_aspect': True}),
             ('denoise', {'method': 'bilateral', 'kernel_size': 7}),
             ('normalize', {'method': 'standard'}),  # Standard normalization for better SVM
-            ('vectorize', {})
+            ('vectorize', {}),
+            ('reduce', {'method': 'vec-pca', 'n_components': 300, 'random_state': RANDOM_STATE}),
+            ('scale', {}),
         ])
 
     @staticmethod
     def no_denoise_pipeline() -> ImagePipeline:
-        """Pipeline without denoising for comparison."""
+        """Denoise-ablation of :meth:`svm_pipeline` for comparison.
+
+        Identical to ``svm_pipeline`` in every stage *except* the missing
+        ``denoise`` step — same 128x128 grayscale front-end, same ``vec-pca`` to
+        150 components, same ``scale`` — so an A/B run isolates the effect of
+        denoising alone.
+
+        Output: 150 standardized PCA features per image.
+        """
         return ImagePipeline([
             ('grayscale', {}),
             ('resize', {'target_size': (128, 128), 'preserve_aspect': True}),
             ('normalize', {'method': 'minmax'}),
-            ('vectorize', {})
+            ('vectorize', {}),
+            ('reduce', {'method': 'vec-pca', 'n_components': 150, 'random_state': RANDOM_STATE}),
+            ('scale', {}),
         ])
 
     @staticmethod
