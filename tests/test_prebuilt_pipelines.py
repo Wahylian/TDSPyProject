@@ -89,18 +89,28 @@ class TestPipelineStructure:
         "factory_name",
         ["svm_pipeline", "fast_pipeline", "hq_pipeline", "no_denoise_pipeline"],
     )
-    def test_vector_pipelines_end_with_vectorize_and_no_reduce(self, factory_name):
-        """The plain vector pipelines flatten and carry no reduce stage.
+    def test_vector_pipelines_flatten_then_reduce_and_scale(self, factory_name):
+        """The registry vector pipelines flatten, PCA-reduce, then standardize.
+
+        These four are the self-contained classifier front-ends exposed through
+        the training registry: each starts by going to grayscale, flattens with
+        ``vectorize``, compresses the flat vector with a ``vec-pca`` reduce, and
+        ends with a ``scale`` standardization so the features are ready for a
+        scale-sensitive model with nothing appended downstream.
 
         Args:
             factory_name: A vectorizing factory name from the sweep.
         """
         # Act
-        names = _op_names(getattr(PrebuiltPipelines, factory_name)())
-        # Assert: grayscale first, vectorize last, no batch-level reduce.
+        ops = getattr(PrebuiltPipelines, factory_name)().operations
+        names = [n for n, _ in ops]
+        # Assert: grayscale first; flatten then reduce then standardize, in order.
         assert names[0] == "grayscale"
-        assert names[-1] == "vectorize"
-        assert "reduce" not in names
+        assert names[-1] == "scale"
+        assert names.index("vectorize") < names.index("reduce") < names.index("scale")
+        # The reduce stage is a vector PCA compression.
+        reduce_kwargs = ops[names.index("reduce")][1]
+        assert reduce_kwargs.get("method") == "vec-pca"
 
     def test_fast_embedding_pipeline_uses_vgg16_vectorize(self):
         """The embedding pipeline's vectorize stage requests the VGG16 method.
@@ -176,16 +186,22 @@ class TestPipelineStructure:
 class TestPipelineExecution:
     """A representative subset run end-to-end through ``batch_process``."""
 
-    def test_fast_pipeline_produces_flat_feature_matrix(self, image_batch):
-        """``fast_pipeline`` yields one 64x64 grayscale feature vector per image.
+    def test_fast_pipeline_produces_reduced_feature_matrix(self, image_batch):
+        """``fast_pipeline`` yields one reduced, standardized row per image.
+
+        The pipeline now ends with a ``vec-pca`` reduce (requested 150) and a
+        ``scale``. PCA cannot keep more components than the batch rank, so on
+        this small batch the width is clamped to ``n_images``; the row count and
+        float32 dtype are the stable contract.
 
         Args:
             image_batch: list of 6 same-shaped colour images (fixture).
         """
         # Act
         out = batch_process(image_batch, PrebuiltPipelines.fast_pipeline())
-        # Assert: (n_images, 64*64) flat feature matrix.
-        assert out.shape == (len(image_batch), 64 * 64)
+        # Assert: one row per image, width reduced (clamped to the batch rank).
+        assert out.shape[0] == len(image_batch)
+        assert out.shape[1] <= min(len(image_batch), 64 * 64)
         assert out.dtype == np.float32
 
     def test_vec_pca_pipeline_reduces_width_across_batch(self, image_batch):
