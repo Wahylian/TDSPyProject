@@ -18,7 +18,6 @@ inferred as square grayscale from the vector width.
 
 from __future__ import annotations
 
-import logging
 from typing import Dict, Optional, Tuple
 
 import numpy as np
@@ -29,8 +28,6 @@ import torch
 from torch import nn
 
 from .model_registry import RANDOM_STATE, ModelSpec
-
-logger = logging.getLogger(__name__)
 
 
 def _resolve_image_shape(
@@ -155,6 +152,11 @@ class _CNNModule(nn.Module):
 
     def __init__(self, in_shape, n_classes, channels=(16, 32), n_blocks=2):
         super().__init__()
+        if n_blocks > len(channels):
+            raise ValueError(
+                f"n_blocks ({n_blocks}) exceeds available channel widths "
+                f"({len(channels)}); provide at least n_blocks channel values."
+            )
         c, h, w = in_shape
         layers = []
         prev = c
