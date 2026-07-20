@@ -1,0 +1,18 @@
+# Core runtime dependencies for the training and preprocessing pipeline.
+numpy
+pandas
+opencv-python
+Pillow
+scikit-learn
+joblib
+
+# Optional: VGG16 feature embeddings (preprocessing/vectorize.py). Only needed
+# if you use an embedding-based pipeline; install one Keras backend.
+# keras
+# tensorflow
+
+# Optional: dataset download (download_dataset.py).
+# kagglehub
+
+# Development / testing.
+# pytest

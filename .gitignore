@@ -4,5 +4,6 @@
 .claude
 .git
 .idea
+MEMORY.md
 \datasets
 \feature_cache

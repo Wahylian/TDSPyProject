@@ -1,15 +1,11 @@
+import logging
 import os
 import shutil
 from pathlib import Path
 
-# Make kagglehub download into the project's 'datasets' folder instead of the
-# default ~/.cache/kagglehub location. kagglehub appends its own
-# 'datasets/<owner>/<name>/versions/<n>' tree under KAGGLEHUB_CACHE, so pointing
-# the cache at the project root lands the files inside the existing 'datasets' folder.
-# Must be set before kagglehub is imported.
-os.environ["KAGGLEHUB_CACHE"] = str(Path(__file__).parent)
+logger = logging.getLogger(__name__)
 
-import kagglehub
+DATASET_ID = "ayushmandatta1/deepdetect-2025"
 
 
 def restructure_to_real_fake(dataset_root: Path) -> None:
@@ -39,9 +35,36 @@ def restructure_to_real_fake(dataset_root: Path) -> None:
     print(f"Restructured into: {dataset_root / 'real'} and {dataset_root / 'fake'}")
 
 
-# Download latest version (directly into the project's 'datasets' folder)
-path = kagglehub.dataset_download("ayushmandatta1/deepdetect-2025")
+def main() -> None:
+    """Download the dataset into the project's 'datasets' folder and restructure it.
 
-restructure_to_real_fake(Path(path))
+    Isolating the network call here (rather than at module level) means importing
+    this module has no side effects — the download only runs when the script is
+    executed directly.
+    """
+    # Make kagglehub download into the project's 'datasets' folder instead of the
+    # default ~/.cache/kagglehub location. kagglehub appends its own
+    # 'datasets/<owner>/<name>/versions/<n>' tree under KAGGLEHUB_CACHE, so
+    # pointing the cache at the project root lands the files inside the existing
+    # 'datasets' folder. Must be set before kagglehub is imported.
+    os.environ["KAGGLEHUB_CACHE"] = str(Path(__file__).parent)
+    import kagglehub
 
-print("Path to dataset files:", path)
+    try:
+        path = kagglehub.dataset_download(DATASET_ID)
+    except Exception as exc:
+        logger.error(
+            "Failed to download dataset '%s': %s. Check your network connection "
+            "and Kaggle credentials (see kagglehub authentication docs).",
+            DATASET_ID,
+            exc,
+        )
+        raise
+
+    restructure_to_real_fake(Path(path))
+    print("Path to dataset files:", path)
+
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+    main()

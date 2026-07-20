@@ -4,6 +4,17 @@ Image I/O helpers.
 Thin wrappers around PIL and OpenCV for loading images into NumPy arrays.
 Kept in their own module so callers that only need bytes/file loading don't
 have to import the heavier ``transforms.py`` / ``vectorize.py`` modules.
+
+Color-space caveat
+------------------
+These loaders do NOT return a consistent channel order, because their backends
+differ: the PIL-based loaders (``load_image_from_bytes``, ``load_image_from_pil``)
+return **RGB**, while the OpenCV-based ``load_image_from_file`` returns **BGR**
+(``cv2.imread`` convention). Nothing here reconciles the two. Callers that mix
+loaders, or that care about channel order (e.g. color-sensitive features or a
+pretrained model expecting RGB), must normalize explicitly — typically
+``cv2.cvtColor(img, cv2.COLOR_BGR2RGB)`` on the OpenCV path. The grayscale
+front-end used by the training pipelines is unaffected.
 """
 
 import io
@@ -42,7 +53,8 @@ def load_image_from_file(file_path: str) -> np.ndarray:
         file_path: Path to image file.
 
     Returns:
-        Image as np.ndarray (BGR format from OpenCV).
+        Image as np.ndarray (BGR format from OpenCV). Note this differs from the
+        RGB returned by the PIL-based loaders — see the module docstring.
 
     Raises:
         FileNotFoundError: If file doesn't exist.
@@ -50,6 +62,8 @@ def load_image_from_file(file_path: str) -> np.ndarray:
     """
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"Image file not found: {file_path}")
+    # cv2.imread returns BGR (not RGB); no conversion is applied here, so callers
+    # mixing this with the PIL loaders must reconcile the channel order themselves.
     image = cv2.imread(file_path)
     if image is None:
         raise ValueError(f"Failed to read image: {file_path}")
@@ -64,6 +78,6 @@ def load_image_from_pil(pil_image: PILImage.Image) -> np.ndarray:
         pil_image: PIL Image object.
 
     Returns:
-        Image as np.ndarray.
+        Image as np.ndarray (RGB, matching PIL — see the module docstring).
     """
     return np.array(pil_image)

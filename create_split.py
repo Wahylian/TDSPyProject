@@ -38,7 +38,7 @@ import pandas as pd
 PROJECT_DIR = Path(__file__).resolve().parent
 
 # Default location of the image dataset (the folder holding real/ and fake/),
-# as downloaded and restructured by data_download_test.py. kagglehub stores it
+# as downloaded and restructured by download_dataset.py. kagglehub stores it
 # under a versioned cache path; version 1 is the dataset currently on disk.
 DEFAULT_DATA_DIR = (
     PROJECT_DIR / "datasets" / "ayushmandatta1" / "deepdetect-2025" / "versions" / "1"

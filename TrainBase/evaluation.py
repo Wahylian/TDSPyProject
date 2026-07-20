@@ -1,8 +1,8 @@
 """Evaluation suite for a fitted classifier.
 
 Computes the headline classification metrics (accuracy, precision, recall, F1,
-ROC-AUC) plus a confusion matrix and per-class report, and provides a naive
-majority-class baseline so a trained model's numbers have a floor to beat. 
+PR-AUC, ROC-AUC) plus a confusion matrix and per-class report, and provides a
+naive majority-class baseline so a trained model's numbers have a floor to beat.
 Every metric is returned as a JSON-serializable dict suitable for saving as an
 artifact, and is also logged in a human-readable block.
 """
@@ -17,6 +17,7 @@ from sklearn.base import BaseEstimator
 from sklearn.dummy import DummyClassifier
 from sklearn.metrics import (
     accuracy_score,
+    average_precision_score,
     classification_report,
     confusion_matrix,
     f1_score,
@@ -37,9 +38,10 @@ CLASS_NAMES = ["real", "fake"]
 def _positive_scores(model: BaseEstimator, X: np.ndarray) -> Optional[np.ndarray]:
     """Return per-sample scores for the positive class (label 1 = fake).
 
-    Used for ROC-AUC. Prefers calibrated probabilities when available, otherwise
-    falls back to the raw decision function. 
-    Returns ``None`` if the model exposes neither (so ROC-AUC can be skipped gracefully).
+    Used for PR-AUC and ROC-AUC. Prefers calibrated probabilities when
+    available, otherwise falls back to the raw decision function.
+    Returns ``None`` if the model exposes neither (so the AUC metrics can be
+    skipped gracefully).
     """
     if hasattr(model, "predict_proba"):
         return model.predict_proba(X)[:, 1]
@@ -56,12 +58,13 @@ def evaluate(
 ) -> Dict[str, object]:
     """Compute the full evaluation suite for a fitted model on the test split.
 
-    Reports accuracy, precision, recall, F1 and ROC-AUC, plus a confusion matrix
-    and a per-class classification report (logged for human inspection).
+    Reports accuracy, precision, recall, F1, PR-AUC and ROC-AUC, plus a
+    confusion matrix and a per-class classification report (logged for human
+    inspection).
 
     Args:
         model: A fitted estimator with ``predict`` (and ideally
-            ``predict_proba``/``decision_function`` for ROC-AUC).
+            ``predict_proba``/``decision_function`` for PR-AUC/ROC-AUC).
         X_test, y_test: Held-out test features/labels.
         model_label: Name used in log lines and the returned dict.
 
@@ -79,7 +82,9 @@ def evaluate(
         "precision": float(precision_score(y_test, y_pred, zero_division=0)),
         "recall": float(recall_score(y_test, y_pred, zero_division=0)),
         "f1": float(f1_score(y_test, y_pred, zero_division=0)),
-        # ROC-AUC needs continuous scores; None if the model can't provide them.
+        # PR-AUC and ROC-AUC need continuous scores; None if the model can't
+        # provide them (e.g. an SVC with probability=False and no decision_function).
+        "pr_auc": float(average_precision_score(y_test, scores)) if scores is not None else None,
         "roc_auc": float(roc_auc_score(y_test, scores)) if scores is not None else None,
     }
 
@@ -96,6 +101,8 @@ def evaluate(
     logger.info("  Precision: %.4f", metrics["precision"])
     logger.info("  Recall   : %.4f", metrics["recall"])
     logger.info("  F1-score : %.4f", metrics["f1"])
+    if metrics["pr_auc"] is not None:
+        logger.info("  PR-AUC   : %.4f", metrics["pr_auc"])
     if metrics["roc_auc"] is not None:
         logger.info("  ROC-AUC  : %.4f", metrics["roc_auc"])
     # Confusion matrix laid out with labelled rows (true) and columns (pred).

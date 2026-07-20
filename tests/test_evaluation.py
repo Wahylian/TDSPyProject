@@ -32,7 +32,7 @@ from trainbase.evaluation import (
 )
 
 # The headline scalar metrics every evaluation dict must report.
-HEADLINE_KEYS = {"accuracy", "precision", "recall", "f1", "roc_auc"}
+HEADLINE_KEYS = {"accuracy", "precision", "recall", "f1", "pr_auc", "roc_auc"}
 
 
 # --- Stub models for the score-source / no-score paths ----------------------
@@ -134,16 +134,18 @@ class TestEvaluate:
         metrics = evaluate(model, s.X_test, s.y_test)
         assert metrics["accuracy"] == pytest.approx(1.0)
         assert metrics["f1"] == pytest.approx(1.0)
+        assert metrics["pr_auc"] == pytest.approx(1.0)
         assert metrics["roc_auc"] == pytest.approx(1.0)
 
-    def test_roc_auc_is_none_without_score_source(self):
-        """A predict-only model produces ``roc_auc=None`` rather than erroring.
+    def test_auc_metrics_are_none_without_score_source(self):
+        """A predict-only model produces ``pr_auc``/``roc_auc`` of ``None`` rather than erroring.
 
-        ROC-AUC needs continuous scores; when the model exposes none, the field
-        is ``None`` and the rest of the suite still computes.
+        The AUC metrics need continuous scores; when the model exposes none, both
+        fields are ``None`` and the rest of the suite still computes.
         """
         y_test = np.array([0, 1, 0, 1])
         metrics = evaluate(_BareModel(), np.zeros((4, 2)), y_test)
+        assert metrics["pr_auc"] is None
         assert metrics["roc_auc"] is None
         assert metrics["n_test"] == 4
 

@@ -1,11 +1,16 @@
 """
-Tests for ``trainbase/artifacts.py`` — run persistence.
+Tests for ``trainbase/artifacts.py`` — run persistence and metadata assembly.
 
-:func:`save_artifacts` writes the three files that make a run reproducible: the
-fitted classifier (joblib), the fitted feature pipeline (joblib), and the metrics (JSON). 
-These tests pin the filenames, that a missing (nested) output directory
-is created, that the metrics round-trip byte-for-value through JSON, and that the
+:func:`save_artifacts` writes an isolated run bundle
+(``<base>/<model>/<run_id>/``) holding the fitted classifier (joblib), the
+fitted feature pipeline (joblib), and the uniform ``metadata.json``. These tests
+pin the layout, that missing parent directories are created, that reruns are
+isolated (no overwrite), that the metadata round-trips through JSON, and that the
 two joblib artifacts reload into equivalent objects.
+
+:func:`build_metadata` assembles the uniform record; a test pins its schema —
+the five headline metrics under ``evaluation_metrics``, and the confusion matrix
+folded into ``diagnostics``.
 
 A tiny fitted ``DummyClassifier`` and a trivial real ``ImagePipeline`` stand in
 for the heavy real artifacts so the round-trip stays fast and pickling is real
@@ -22,82 +27,138 @@ import pytest
 from sklearn.dummy import DummyClassifier
 
 from preprocessing import ImagePipeline
-from trainbase.artifacts import save_artifacts
+from trainbase.artifacts import HEADLINE_METRICS, build_metadata, save_artifacts
 
 
 @pytest.fixture
 def fitted_artifacts():
-    """A fitted dummy model, a real pipeline, and a metrics dict to persist."""
+    """A fitted dummy model, a real pipeline, and a metadata dict to persist."""
     model = DummyClassifier(strategy="most_frequent").fit(
         np.zeros((4, 2)), np.array([0, 1, 0, 0])
     )
     pipeline = ImagePipeline([("grayscale", {}), ("vectorize", {})])
-    metrics = {"model": "demo", "accuracy": 0.75, "confusion_matrix": [[2, 0], [1, 1]]}
-    return model, pipeline, metrics
+    metadata = {
+        "model_name": "demo",
+        "run_id": "20260720_120000",
+        "evaluation_metrics": {"accuracy": 0.75},
+        "diagnostics": {"confusion_matrix": [[2, 0], [1, 1]]},
+    }
+    return model, pipeline, metadata
 
 
 class TestSaveArtifacts:
-    """Serializing the model, feature pipeline, and metrics."""
+    """Serializing the model, feature pipeline, and metadata into a run dir."""
 
-    def test_writes_three_named_artifacts(self, tmp_path, fitted_artifacts):
-        """All three artifacts are written with the ``{model_name}_*`` names.
+    def test_writes_run_bundle(self, tmp_path, fitted_artifacts):
+        """The three artifacts land in ``<base>/<model>/<run_id>/`` and the dir is returned."""
+        model, pipeline, metadata = fitted_artifacts
+        run_dir = save_artifacts(
+            model, pipeline, metadata, tmp_path, model_name="svm", run_id="20260720_120000"
+        )
 
-        Args:
-            tmp_path: pytest temp output dir (fixture).
-            fitted_artifacts: (model, pipeline, metrics) to persist (fixture).
-        """
-        model, pipeline, metrics = fitted_artifacts
-        save_artifacts(model, pipeline, metrics, tmp_path, model_name="svm")
+        assert run_dir == tmp_path / "svm" / "20260720_120000"
+        assert (run_dir / "model.joblib").is_file()
+        assert (run_dir / "feature_pipeline.joblib").is_file()
+        assert (run_dir / "metadata.json").is_file()
 
-        assert (tmp_path / "svm_model.joblib").is_file()
-        assert (tmp_path / "svm_feature_pipeline.joblib").is_file()
-        assert (tmp_path / "svm_metrics.json").is_file()
+    def test_creates_missing_parent_dirs(self, tmp_path, fitted_artifacts):
+        """A non-existent base directory (and the model/run subdirs) are created."""
+        model, pipeline, metadata = fitted_artifacts
+        base = tmp_path / "artifacts"
+        assert not base.exists()
 
-    def test_creates_missing_nested_output_dir(self, tmp_path, fitted_artifacts):
-        """A non-existent (nested) ``output_dir`` is created before writing.
+        run_dir = save_artifacts(
+            model, pipeline, metadata, base, model_name="rf", run_id="20260720_130000"
+        )
 
-        Args:
-            tmp_path: pytest temp dir root (fixture).
-            fitted_artifacts: (model, pipeline, metrics) to persist (fixture).
-        """
-        model, pipeline, metrics = fitted_artifacts
-        nested = tmp_path / "runs" / "exp1"
-        assert not nested.exists()
+        assert (run_dir / "metadata.json").is_file()
 
-        save_artifacts(model, pipeline, metrics, nested, model_name="rf")
+    def test_reruns_are_isolated(self, tmp_path, fitted_artifacts):
+        """Two runs of the same model write to distinct run dirs — no overwrite."""
+        model, pipeline, metadata = fitted_artifacts
+        first = save_artifacts(model, pipeline, metadata, tmp_path, "svm", "20260720_120000")
+        second = save_artifacts(model, pipeline, metadata, tmp_path, "svm", "20260720_120001")
 
-        assert (nested / "rf_metrics.json").is_file()
+        assert first != second
+        assert (first / "metadata.json").is_file()
+        assert (second / "metadata.json").is_file()
 
-    def test_metrics_json_round_trips_to_equal_dict(self, tmp_path, fitted_artifacts):
-        """The metrics JSON reloads to a dict equal to the one passed in.
+    def test_metadata_json_round_trips_to_equal_dict(self, tmp_path, fitted_artifacts):
+        """The metadata JSON reloads to a dict equal to the one passed in."""
+        model, pipeline, metadata = fitted_artifacts
+        run_dir = save_artifacts(model, pipeline, metadata, tmp_path, "lr", "20260720_120000")
 
-        Args:
-            tmp_path: pytest temp output dir (fixture).
-            fitted_artifacts: (model, pipeline, metrics) to persist (fixture).
-        """
-        model, pipeline, metrics = fitted_artifacts
-        save_artifacts(model, pipeline, metrics, tmp_path, model_name="lr")
-
-        with (tmp_path / "lr_metrics.json").open(encoding="utf-8") as f:
+        with (run_dir / "metadata.json").open(encoding="utf-8") as f:
             reloaded = json.load(f)
-        assert reloaded == metrics
+        assert reloaded == metadata
 
     def test_joblib_artifacts_reload_into_equivalent_objects(self, tmp_path, fitted_artifacts):
         """The model and pipeline reload into working, equivalent objects.
 
         The reloaded pipeline keeps its operation list, and the reloaded model
         still predicts the most-frequent class (0) it was fit on.
-
-        Args:
-            tmp_path: pytest temp output dir (fixture).
-            fitted_artifacts: (model, pipeline, metrics) to persist (fixture).
         """
-        model, pipeline, metrics = fitted_artifacts
-        save_artifacts(model, pipeline, metrics, tmp_path, model_name="svm")
+        model, pipeline, metadata = fitted_artifacts
+        run_dir = save_artifacts(model, pipeline, metadata, tmp_path, "svm", "20260720_120000")
 
-        reloaded_pipeline = joblib.load(tmp_path / "svm_feature_pipeline.joblib")
-        reloaded_model = joblib.load(tmp_path / "svm_model.joblib")
+        reloaded_pipeline = joblib.load(run_dir / "feature_pipeline.joblib")
+        reloaded_model = joblib.load(run_dir / "model.joblib")
 
         assert reloaded_pipeline.operations == pipeline.operations
         # Majority class of the fit labels was 0; the reloaded model still says 0.
         assert list(reloaded_model.predict(np.zeros((3, 2)))) == [0, 0, 0]
+
+
+class TestBuildMetadata:
+    """Assembling the uniform metadata record."""
+
+    def _call(self):
+        test_metrics = {
+            "accuracy": 0.9, "precision": 0.88, "recall": 0.91, "f1": 0.89,
+            "pr_auc": 0.93, "roc_auc": 0.95,
+            "confusion_matrix": [[45, 5], [4, 46]],
+            "classification_report": "report-text",
+        }
+        baseline = {"accuracy": 0.54, "precision": 0.0, "recall": 0.0, "pr_auc": 0.46, "roc_auc": 0.5}
+        diagnostics = {
+            "feature_importances": None, "oob_score": None,
+            "hyperparameter_scores": [{"params": {"clf__C": 1.0}, "mean_val_score": 0.8, "std_val_score": 0.0}],
+            "learning_curve": None,
+        }
+        return build_metadata(
+            model_name="svm", run_id="20260720_120000", timestamp="2026-07-20T12:00:00",
+            pipeline_used="svm", pipeline_spec=None, pipeline_steps=[["grayscale", {}]],
+            scoring="f1", sample_sizes={"train": 100, "val": 50, "test": 50},
+            hyperparameters={"clf__C": 1.0}, best_val_score=0.8,
+            test_metrics=test_metrics, baseline_metrics=baseline, diagnostics=diagnostics,
+        )
+
+    def test_headline_metrics_extracted(self):
+        """``evaluation_metrics`` holds exactly the five standardized headline keys."""
+        meta = self._call()
+        assert set(meta["evaluation_metrics"]) == set(HEADLINE_METRICS)
+        assert set(meta["baseline_metrics"]) == set(HEADLINE_METRICS)
+        assert "f1" not in meta["evaluation_metrics"]
+        assert meta["evaluation_metrics"]["pr_auc"] == 0.93
+
+    def test_confusion_matrix_folded_into_diagnostics(self):
+        """The confusion matrix and report move under ``diagnostics``."""
+        meta = self._call()
+        assert meta["diagnostics"]["confusion_matrix"] == [[45, 5], [4, 46]]
+        assert meta["diagnostics"]["classification_report"] == "report-text"
+        # Estimator-specific diagnostics are preserved alongside.
+        assert "hyperparameter_scores" in meta["diagnostics"]
+
+    def test_top_level_schema_is_uniform(self):
+        """Every expected top-level key is present."""
+        meta = self._call()
+        expected = {
+            "model_name", "run_id", "timestamp", "pipeline_used", "pipeline_spec",
+            "pipeline_steps", "scoring", "sample_sizes", "hyperparameters",
+            "best_val_score", "evaluation_metrics", "baseline_metrics", "diagnostics",
+        }
+        assert set(meta) == expected
+
+    def test_metadata_is_json_serializable(self):
+        """The assembled record serializes cleanly."""
+        json.dumps(self._call())

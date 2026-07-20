@@ -39,7 +39,6 @@ from prebuilt_pipelines import PrebuiltPipelines
 try:
     from sklearn.svm import SVC
     from sklearn.ensemble import RandomForestClassifier
-    from sklearn.preprocessing import StandardScaler
     from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 except ImportError:
     pass
@@ -53,8 +52,9 @@ def load_sample_dataset(num_samples: int = 10) -> Tuple[List[np.ndarray], np.nda
     """
     Generate synthetic dataset for demonstration.
     
-    In production, replace this with actual image loading from:
-    datasets/chuneeb/deepfake-detection-dataset-2026/FINAL_DATASET.csv
+    In production, replace this with actual image loading driven by the split
+    manifest datasets/dataset_split.csv (produced by create_split.py over the
+    datasets/ayushmandatta1/deepdetect-2025/versions/1/ real/ and fake/ folders).
     
     Args:
         num_samples: Number of synthetic images to generate
@@ -209,23 +209,22 @@ def train_svm_model(
     labels: np.ndarray,
     kernel: str = 'rbf',
     C: float = 1.0
-) -> Tuple['SVC', 'StandardScaler']:
-    """Train SVM classifier on extracted features."""
-    
+) -> 'SVC':
+    """Train SVM classifier on extracted features.
+
+    The features come from a pipeline that already ends in a ``'scale'`` step
+    (standardization), so no separate StandardScaler is applied here.
+    """
+
     print(f"\nTraining SVM with {features.shape[0]} samples, {features.shape[1]} features...")
-    
-    # SVM is sensitive to feature scale; StandardScaler normalizes to zero mean, unit variance
-    scaler = StandardScaler()
-    features_scaled = scaler.fit_transform(features)
-    
+
     # RBF kernel with gamma='scale' (1 / (n_features * X.var())) is a solid default;
     # C controls the margin softness — higher C = less tolerance for misclassification
     svm = SVC(kernel=kernel, C=C, gamma='scale', verbose=0)
-    svm.fit(features_scaled, labels)
-    
+    svm.fit(features, labels)
+
     print(f"✓ SVM trained. Support vectors: {len(svm.support_vectors_)}")
-    # Return scaler alongside the model so test features can be transformed consistently
-    return svm, scaler
+    return svm
 
 
 def train_random_forest(
@@ -250,15 +249,14 @@ def evaluate_model(
     model,
     features_test: np.ndarray,
     labels_test: np.ndarray,
-    scaler=None,
     model_name: str = "Model"
 ) -> dict:
-    """Evaluate model and return metrics."""
-    
-    # Apply the same scaling used during training (fit only on train set)
-    if scaler is not None:
-        features_test = scaler.transform(features_test)
-    
+    """Evaluate model and return metrics.
+
+    Test features are expected to come from the same pipeline used in training
+    (which already standardizes them), so no separate scaling is applied here.
+    """
+
     predictions = model.predict(features_test)
     
     # zero_division=0 suppresses warnings when a class has no predicted samples

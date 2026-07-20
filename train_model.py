@@ -19,7 +19,7 @@ Pipeline stages (per run):
       (no leakage).
     * Tune the model's hyperparameters against the validation split.
     * Evaluate the tuned model on the test split (against a naive baseline).
-    * Save the fitted feature pipeline, the model, and the metrics.
+    * Save the fitted feature pipeline, the model, and a uniform metadata.json.
 
 Feature pipelines are self-contained
 -------------------------------------
@@ -76,14 +76,19 @@ How to Run (Example):
         python train_model.py --max-test-samples 10000
         NOTE: For the maximal sample size do --max-test-samples 0
 
-    #   Choosing Output Directory (a folder name or path; created if missing):
-        python train_model.py --output-dir my_run
-        python train_model.py --output-dir results/run1
-        NOTE: Defaults to `outputs/`
+    #   Saving Diagnostics (adds the sample-size learning curve; extra fits):
+        python train_model.py --model rf --diagnostics
 
-Artifacts (the fitted classifier, the fitted feature pipeline — which holds the
-PCA basis *and* the scaling statistics — and the metrics JSON) are written to
-``outputs/`` by default (override with ``--output-dir``).
+    #   Choosing the Artifacts Root (a folder name or path; created if missing):
+        python train_model.py --output-dir my_runs
+        NOTE: Defaults to `artifacts/`.
+
+Each run writes an isolated bundle to ``artifacts/<model>/<run_id>/`` (override
+the root with ``--output-dir``), so reruns of the same model never overwrite one
+another. The bundle holds the fitted classifier (``model.joblib``), the fitted
+feature pipeline (``feature_pipeline.joblib`` — which holds the PCA basis *and*
+the scaling statistics), and a uniform ``metadata.json`` (configuration,
+hyperparameters, headline metrics, and diagnostics).
 
 How to Add a New Model to the Registry: see 'trainbase/model_registry.py'.
 
@@ -98,6 +103,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import logging
+from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
@@ -107,6 +113,8 @@ from trainbase import (
     baseline_metrics,
     build_estimator,
     build_feature_pipeline,
+    build_metadata,
+    collect_diagnostics,
     evaluate,
     fit_features,
     save_artifacts,
@@ -158,6 +166,10 @@ def main(args: argparse.Namespace) -> None:
     output_dir = Path(args.output_dir)
     cache_dir = Path(args.cache_dir) if args.cache_dir else None
     cache_prefix = _cache_prefix(args)
+
+    # A per-run identifier isolates each run's artifacts so reruns never overwrite.
+    run_start = datetime.now()
+    run_id = run_start.strftime("%Y%m%d_%H%M%S")
 
     # --- Build the feature pipeline (a registry name or a custom JSON spec).
     #     It is used exactly as defined: any required reduce/scale steps must
@@ -212,19 +224,36 @@ def main(args: argparse.Namespace) -> None:
             baseline["accuracy"],
         )
 
-    # --- 4. Save artifacts (fitted feature pipeline + model + metrics). ------
-    report = {
-        "model_name": args.model,
+    # --- 4. Collect diagnostics and save the run bundle. ---------------------
+    #     Cheap diagnostics (feature importances, OOB, hyperparameter grid
+    #     scores) are always captured; the sample-size learning curve is gated
+    #     behind --diagnostics because it costs extra model fits.
+    diagnostics = collect_diagnostics(
+        search, best_model, X_train, y_train,
+        include_curves=args.diagnostics, scoring=args.scoring,
+    )
+    metadata = build_metadata(
+        model_name=args.model,
+        run_id=run_id,
+        timestamp=run_start.isoformat(timespec="seconds"),
         # Record how the feature space was specified: a registry name, or the
-        # verbatim custom spec (so the run is reproducible from the metrics).
-        "pipeline": "custom" if custom_pipeline else args.pipeline,
-        "pipeline_spec": args.pipeline_spec,
-        "best_params": search.best_params_,
-        "best_val_score": float(search.best_score_),
-        "test_metrics": model_metrics,
-        "baseline_metrics": baseline,
-    }
-    save_artifacts(best_model, feature_pipeline, report, output_dir, args.model)
+        # verbatim custom spec (so the run is reproducible from the metadata).
+        pipeline_used="custom" if custom_pipeline else args.pipeline,
+        pipeline_spec=args.pipeline_spec,
+        pipeline_steps=feature_pipeline.operations,
+        scoring=args.scoring,
+        sample_sizes={
+            "train": int(len(y_train)),
+            "val": int(len(y_val)),
+            "test": int(len(y_test)),
+        },
+        hyperparameters=search.best_params_,
+        best_val_score=float(search.best_score_),
+        test_metrics=model_metrics,
+        baseline_metrics=baseline,
+        diagnostics=diagnostics,
+    )
+    save_artifacts(best_model, feature_pipeline, metadata, output_dir, args.model, run_id)
     logger.info("Done.")
 
 
@@ -281,11 +310,18 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         help="Metric GridSearchCV optimizes on the validation split.",
     )
     parser.add_argument(
-        "--output-dir", default="outputs",
-        help="Directory for the saved model and metrics.",
+        "--diagnostics", action="store_true",
+        help="Also compute the sample-size learning curve (extra model fits, "
+        "off by default). Cheap diagnostics (feature importances, OOB, "
+        "hyperparameter-grid scores) are always saved regardless.",
     )
     parser.add_argument(
-        "--cache-dir", default="outputs/feature_cache",
+        "--output-dir", default="artifacts",
+        help="Root directory for run artifacts, written to "
+        "<output-dir>/<model>/<run_id>/.",
+    )
+    parser.add_argument(
+        "--cache-dir", default="feature_cache",
         help="Directory for the feature cache (set empty '' to disable).",
     )
     return parser.parse_args(argv)

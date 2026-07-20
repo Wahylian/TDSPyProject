@@ -67,8 +67,11 @@ from .evaluation import (
     baseline_metrics,
 )
 
-# -- Run persistence (fitted pipeline + classifier + metrics). ---------------
-from .artifacts import save_artifacts
+# -- Algorithm-appropriate diagnostics for graphing & comparison. ------------
+from .diagnostics import collect_diagnostics
+
+# -- Run persistence (fitted pipeline + classifier + metadata). --------------
+from .artifacts import build_metadata, save_artifacts
 
 # The explicit public API of the package. Anything not listed here is an
 # implementation detail and may change without notice.
@@ -90,6 +93,9 @@ __all__ = [
     "CLASS_NAMES",
     "evaluate",
     "baseline_metrics",
+    # diagnostics
+    "collect_diagnostics",
     # persistence
+    "build_metadata",
     "save_artifacts",
 ]

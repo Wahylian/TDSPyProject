@@ -77,9 +77,11 @@ MODEL_REGISTRY: Dict[str, ModelSpec] = {
     ),
     # Random Forest — a strong, scale-insensitive baseline. Included to
     # demonstrate how trivially the classifier swaps out (`--model rf`).
+    # oob_score=True exposes an out-of-bag error estimate (clf.oob_score_) that
+    # the diagnostics collector saves; it relies on the default bootstrap=True.
     "rf": ModelSpec(
         factory=lambda: RandomForestClassifier(
-            random_state=RANDOM_STATE, n_jobs=-1
+            random_state=RANDOM_STATE, n_jobs=-1, oob_score=True
         ),
         param_grid={
             "clf__n_estimators": [200, 400],
