@@ -135,6 +135,47 @@ class PrebuiltPipelines:
         ])
 
     # ----------------------------------------------------------------------
+    # Raw-pixel pipelines (no dimensionality reduction).
+    # These deliberately OMIT 'reduce'/'scale': they emit the full flattened
+    # pixel vector so a spatial model (CNN/ViT) can reshape it back to an image.
+    # ----------------------------------------------------------------------
+
+    @staticmethod
+    def pixels_pipeline() -> ImagePipeline:
+        """Raw 64x64 grayscale pixels, flattened — for CNN/ViT on real pixels.
+
+        No PCA or standardization: the 64x64 grayscale image is min-max
+        normalized to [0, 1] and flattened to a 4,096-length vector. The torch
+        image models reshape this flat vector back to ``(1, 64, 64)`` internally,
+        so the convolution / patch-embedding layers see genuine spatial pixels.
+
+        Output: 4,096 flat pixel features per image (64x64 grayscale).
+        """
+        return ImagePipeline([
+            ('grayscale', {}),
+            ('resize', {'target_size': (64, 64), 'preserve_aspect': True}),
+            ('normalize', {'method': 'minmax', 'value_range': (0.0, 1.0)}),
+            ('vectorize', {'preserve_structure': False}),
+        ])
+
+    @staticmethod
+    def pixels_hq_pipeline() -> ImagePipeline:
+        """Raw 128x128 grayscale pixels, flattened — for the deep CNN/ViT presets.
+
+        Same idea as :meth:`pixels_pipeline` at higher resolution: 128x128
+        grayscale, min-max normalized, flattened to 16,384 pixels. The torch
+        models reshape it to ``(1, 128, 128)``.
+
+        Output: 16,384 flat pixel features per image (128x128 grayscale).
+        """
+        return ImagePipeline([
+            ('grayscale', {}),
+            ('resize', {'target_size': (128, 128), 'preserve_aspect': True}),
+            ('normalize', {'method': 'minmax', 'value_range': (0.0, 1.0)}),
+            ('vectorize', {'preserve_structure': False}),
+        ])
+
+    # ----------------------------------------------------------------------
     # Vector dimensionality reduction.
     # Each pipeline vectorizes the image, then reduces the flat feature vector.
     # All three share the same per-image stages and differ only in the trailing
