@@ -20,6 +20,7 @@ Fixture cheat-sheet
     tmp_image_file       -> path to a real PNG written to a tmp dir
     fake_vgg16           -> seeds the module-level VGG16 cache with a stub model
     feature_split        -> SimpleNamespace of small separable train/val/test feature splits
+    pixel_split          -> SimpleNamespace of small separable train/val/test flat-pixel splits
     image_label_pairs    -> list[(uint8 image, int label)] for a mocked feature stream
 """
 
@@ -189,6 +190,38 @@ def feature_split(rng) -> SimpleNamespace:
         X_train=X_train, y_train=y_train,
         X_val=X_val, y_val=y_val,
         X_test=X_test, y_test=y_test,
+    )
+
+
+@pytest.fixture
+def pixel_split(rng) -> SimpleNamespace:
+    """Tiny separable flat-pixel splits for the torch image models.
+
+    Emulates the ``pixels`` pipeline output: flat 8x8 grayscale vectors (64
+    features) in [0, 1]. Class 0 is dim (~0.2), class 1 is bright (~0.8), so a
+    small CNN/ViT separates them in a couple of epochs. Deliberately tiny so a
+    forward/backward pass runs in milliseconds.
+    """
+    side = 8
+    f = side * side
+
+    def block(level: float, n: int) -> np.ndarray:
+        x = rng.normal(level, 0.05, size=(n, f)).astype(np.float32)
+        return np.clip(x, 0.0, 1.0)
+
+    def split(n: int):
+        X = np.vstack([block(0.2, n), block(0.8, n)]).astype(np.float32)
+        y = np.array([0] * n + [1] * n, dtype=int)
+        return X, y
+
+    X_train, y_train = split(8)
+    X_val, y_val = split(4)
+    X_test, y_test = split(4)
+    return SimpleNamespace(
+        X_train=X_train, y_train=y_train,
+        X_val=X_val, y_val=y_val,
+        X_test=X_test, y_test=y_test,
+        image_shape=(1, side, side),
     )
 
 
