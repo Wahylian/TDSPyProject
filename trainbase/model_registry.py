@@ -60,6 +60,8 @@ class ModelSpec:
 # To add a new classifier: import it above, then add one entry here. Nothing
 # else in the script needs to change — selection is purely by the ``--model``
 # flag, and the PCA->scale feature front-end / tuning / evaluation are shared.
+from .linear_models import ThresholdedLinearRegression
+
 MODEL_REGISTRY: Dict[str, ModelSpec] = {
     # Soft-margin kernel SVM — the focus of this script.
     #   * C       : soft-margin strength (low C = wider margin, more tolerant).
@@ -113,5 +115,11 @@ MODEL_REGISTRY: Dict[str, ModelSpec] = {
     "ridge": ModelSpec(
         factory=lambda: RidgeClassifier(random_state=RANDOM_STATE),
         param_grid={"clf__alpha": [0.1, 1.0, 10.0]},
+    ),
+    # Plain linear regression used as a classifier: regress 0/1 targets and
+    # threshold at 0.5. The most literal "linear regression" baseline.
+    "linreg": ModelSpec(
+        factory=lambda: ThresholdedLinearRegression(random_state=RANDOM_STATE),
+        param_grid={"clf__fit_intercept": [True, False]},
     ),
 }
