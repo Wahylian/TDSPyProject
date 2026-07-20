@@ -11,6 +11,12 @@ joblib
 # keras
 # tensorflow
 
+# Optional: CNN / ViT deep models (trainbase/torch_models.py). CPU wheels are
+# fine; only needed if you run --model cnn/cnn_deep/vit/vit_deep. Install with:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+# torch
+# torchvision
+
 # Optional: dataset download (download_dataset.py).
 # kagglehub
 

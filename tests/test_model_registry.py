@@ -158,3 +158,20 @@ class TestNewClassicalModels:
         assert hasattr(est, "decision_function")
         acc = est.score(feature_split.X_test, feature_split.y_test)
         assert acc > 0.8
+
+
+class TestConditionalTorchRegistration:
+    """cnn/vit register only when torch is importable."""
+
+    def test_torch_models_present_iff_torch(self):
+        torch_installed = True
+        try:
+            import torch  # noqa: F401
+        except ImportError:
+            torch_installed = False
+        torch_keys = {"cnn", "cnn_deep", "vit", "vit_deep"}
+        present = torch_keys & set(MODEL_REGISTRY)
+        if torch_installed:
+            assert present == torch_keys
+        else:
+            assert present == set()

@@ -1,11 +1,11 @@
 """
-Helper For 'train_model.py' 
+Helper For 'train_model.py'
 
 Contains the Registry for ML models that the project can train on.
 
-How to add a new classifier to the model Registry (Example): 
+How to add a new classifier to the model Registry (Example):
     To add a Gradiant Boosting model:
-    1. Import it at the top of the file 
+    1. Import it at the top of the file
     2. Add an entry of the following structure to the MODEL_REGISTRY:
         "gb" :  ModelSpec(
                factory=lambda: GradientBoostingClassifier(random_state=RANDOM_STATE),
@@ -15,6 +15,11 @@ How to add a new classifier to the model Registry (Example):
 
     Grid keys are prefixed with ``clf__`` because the estimator is the ``"clf"`` step of the sklearn
     ``Pipeline`` (see ``build_estimator``).
+
+    The registry also carries optional deep models — ``cnn``/``cnn_deep`` and
+    ``vit``/``vit_deep`` — which are registered only when PyTorch is installed
+    (see ``trainbase/torch_models.py``). Pair them with a raw-pixel pipeline:
+    ``--model cnn --pipeline pixels`` (or ``--model cnn_deep --pipeline pixels_hq``).
 """
 
 
@@ -123,3 +128,16 @@ MODEL_REGISTRY: Dict[str, ModelSpec] = {
         param_grid={"clf__fit_intercept": [True, False]},
     ),
 }
+
+
+# --- Optional deep models (CNN / ViT) -------------------------------------
+# Registered only when torch is importable, so the project imports and runs
+# unchanged without the optional PyTorch dependency. Membership is dynamic by
+# design (see the package docstring): with torch installed, `--model cnn/vit`
+# become available automatically.
+try:
+    from .torch_models import build_torch_registry
+
+    MODEL_REGISTRY.update(build_torch_registry())
+except ImportError:  # pragma: no cover - exercised only when torch is absent
+    pass
