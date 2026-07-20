@@ -708,10 +708,7 @@ class _TorchImageClassifier(BaseEstimator, ClassifierMixin):
         bs = max(1, int(self.batch_size))
         module.train()
         for _ in range(int(self.epochs)):
-            for start in range(0, n, bs):
-                idx = rng.permutation(n)[start:start + bs] if False else None
-                # deterministic shuffled minibatches
-            perm = rng.permutation(n)
+            perm = rng.permutation(n)  # shuffled, seeded minibatches
             for start in range(0, n, bs):
                 sel = perm[start:start + bs]
                 xb, yb = X_t[sel], y_t[sel]
@@ -864,8 +861,6 @@ def build_torch_registry() -> Dict[str, ModelSpec]:
     }
 ```
 
-Note: delete the dead `if False` scaffolding line before finalizing — the real minibatch loop is the `perm = rng.permutation(n)` block. (Written explicitly here to flag it; the implementation should contain only the `perm`-based loop.)
-
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `.venv/Scripts/python.exe -m pytest tests/test_torch_models.py -v`
@@ -1011,6 +1006,6 @@ git add -A && git commit -m "test: verify full suite green with new models" || e
 - Tests under ./tests/ → every task adds tests. ✓
 - No changes to train_model/evaluation/etc. → respected. ✓
 
-**Placeholder scan:** One intentional flag in Task 4 Step 3 (the `if False` scaffolding line) with an explicit instruction to remove it; the correct loop is shown. No other TBD/placeholder.
+**Placeholder scan:** None. All steps contain complete, transcribable code.
 
 **Type consistency:** `build_torch_registry` signature matches between Task 4 (produced) and Task 5 (consumed). `ThresholdedLinearRegression` constructor/attributes match between Task 3 definition and its test. Estimator fitted attributes (`classes_`, `module_`, `image_shape_`, `n_features_in_`, `reg_`) are consistent across implementation and tests.
