@@ -26,8 +26,8 @@ from typing import Callable, Dict, List, Optional, Tuple
 from sklearn.base import BaseEstimator
 from sklearn.dummy import DummyClassifier
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.linear_model import LogisticRegression
-from sklearn.svm import SVC
+from sklearn.linear_model import LogisticRegression, RidgeClassifier
+from sklearn.svm import SVC, LinearSVC
 
 # -- Constants ---------------------------------------------------------------
 
@@ -94,5 +94,24 @@ MODEL_REGISTRY: Dict[str, ModelSpec] = {
             max_iter=1000, random_state=RANDOM_STATE
         ),
         param_grid={"clf__C": [0.1, 1.0, 10.0]},
+    ),
+    # Hard-margin SVM — a huge C drives the soft margin toward the hard-margin
+    # limit (no slack). LinearSVC is the fast, purpose-built linear realization;
+    # it exposes decision_function for ROC/PR-AUC.
+    "hard_svm": ModelSpec(
+        factory=lambda: LinearSVC(C=1e6, random_state=RANDOM_STATE),
+        param_grid={"clf__C": [1e4, 1e6]},
+    ),
+    # Same hard margin via the kernel SVC with a linear kernel — mirrors the
+    # existing 'svm' entry's style for a like-for-like comparison.
+    "hard_svm_kernel": ModelSpec(
+        factory=lambda: SVC(kernel="linear", C=1e6, random_state=RANDOM_STATE),
+        param_grid={"clf__C": [1e4, 1e6]},
+    ),
+    # Ridge (least-squares) classifier — "linear regression as a classifier":
+    # it regresses the class targets and thresholds. Exposes decision_function.
+    "ridge": ModelSpec(
+        factory=lambda: RidgeClassifier(random_state=RANDOM_STATE),
+        param_grid={"clf__alpha": [0.1, 1.0, 10.0]},
     ),
 }
