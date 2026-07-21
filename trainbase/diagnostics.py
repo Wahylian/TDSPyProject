@@ -21,6 +21,8 @@ from sklearn.base import clone
 from sklearn.model_selection import GridSearchCV, learning_curve
 from sklearn.pipeline import Pipeline
 
+from .model_registry import RANDOM_STATE
+
 logger = logging.getLogger(__name__)
 
 # Bounded, fixed grid so the (opt-in) learning curve stays affordable even for
@@ -78,6 +80,8 @@ def _learning_curve(
             train_sizes=_LEARNING_CURVE_SIZES,
             cv=_LEARNING_CURVE_CV,
             scoring=scoring,
+            shuffle=True,               # draw each size's subset representatively,
+            random_state=RANDOM_STATE,  # deterministically (not the sorted prefix)
             n_jobs=-1,
         )
     except Exception as exc:  # best-effort diagnostic; never fail the run
