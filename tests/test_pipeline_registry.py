@@ -92,3 +92,30 @@ class TestFactoryBehaviour:
             name: A registered pipeline name from the sweep.
         """
         assert PIPELINE_REGISTRY[name] in PREBUILT_FACTORIES
+
+
+class TestSvmJlRegistration:
+    """The JL-reduction pipeline is registered and routes to its factory."""
+
+    def test_svm_jl_registered_and_routes_to_factory(self):
+        assert "svm_jl" in PIPELINE_REGISTRY
+        assert PIPELINE_REGISTRY["svm_jl"] is PrebuiltPipelines.svm_jl_pipeline
+
+
+class TestConditionalEmbeddingRegistration:
+    """The VGG16 embedding pipelines register only when keras is importable."""
+
+    def test_embedding_present_iff_keras(self):
+        keras_installed = True
+        try:
+            import keras  # noqa: F401
+        except ImportError:
+            keras_installed = False
+        keys = {"embedding_pca", "embedding_jl"}
+        present = keys & set(PIPELINE_REGISTRY)
+        if keras_installed:
+            assert present == keys
+            assert PIPELINE_REGISTRY["embedding_pca"] is PrebuiltPipelines.embedding_pca_pipeline
+            assert PIPELINE_REGISTRY["embedding_jl"] is PrebuiltPipelines.embedding_jl_pipeline
+        else:
+            assert present == set()

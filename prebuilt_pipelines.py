@@ -55,6 +55,29 @@ class PrebuiltPipelines:
         ])
 
     @staticmethod
+    def svm_jl_pipeline() -> ImagePipeline:
+        """JL-reduction twin of :meth:`svm_pipeline` for a PCA-vs-JL comparison.
+
+        Identical to ``svm_pipeline`` in every stage — same 128x128 grayscale
+        front-end, denoise, minmax normalize, vectorize, and trailing ``scale``
+        — except the reduce step uses a Johnson-Lindenstrauss random projection
+        (``vec-jl``) to 150 components instead of PCA (``vec-pca``). JL is
+        data-independent (drawn from a Gaussian, no covariance fit), so an A/B
+        run against ``svm_pipeline`` isolates the reduction method alone.
+
+        Output: 150 standardized JL-projected features per image.
+        """
+        return ImagePipeline([
+            ('grayscale', {}),
+            ('resize', {'target_size': (128, 128), 'preserve_aspect': True}),
+            ('denoise', {'method': 'bilateral', 'kernel_size': 5}),
+            ('normalize', {'method': 'minmax', 'value_range': (0.0, 1.0)}),
+            ('vectorize', {'preserve_structure': False}),
+            ('reduce', {'method': 'vec-jl', 'n_components': 150, 'random_state': RANDOM_STATE}),
+            ('scale', {}),
+        ])
+
+    @staticmethod
     def fast_pipeline() -> ImagePipeline:
         """
         Fast training pipeline: low resolution, minimal per-image preprocessing.
@@ -125,13 +148,72 @@ class PrebuiltPipelines:
     @staticmethod
     def fast_embedding_pipeline() -> ImagePipeline:
         """Fast embedding pipeline: low resolution, using vector embedding for the images.
-        Output: 4,096 features per image (64x64 grayscale)
-        Best for quick experimentation with vector embeddings."""
+        Output: 25,088 features per image (VGG16 block5 embedding).
+        Best for quick experimentation with vector embeddings.
+
+        No pre-embedding normalize: VGG16's preprocess_input owns input scaling
+        (see the embedding-pipelines block comment); normalizing to [0, 1] first
+        would truncate to a black image in the uint8 vgg16 path.
+        """
         return ImagePipeline([
             ('grayscale', {}),
             ('resize', {'target_size': (64, 64), 'preserve_aspect': True}),
-            ('normalize', {'method': 'minmax'}),
             ('vectorize', {'method': "vgg16"})
+        ])
+
+    # ----------------------------------------------------------------------
+    # Learned-embedding pipelines (VGG16), reduced + standardized.
+    # Two variants that differ ONLY in the reduce method (PCA vs JL), for a
+    # like-for-like comparison of reductions on top of deep features. Both embed
+    # the image with VGG16 block5 (25,088-dim), compress it with 'reduce', then
+    # standardize with 'scale', so the output is a compact, standardized feature
+    # vector ready for a scale-sensitive classifier — the deep-feature
+    # counterpart of svm_pipeline / svm_jl_pipeline.
+    #
+    # Deliberately NO 'normalize' step before the vgg16 vectorize: VGG16's own
+    # preprocess_input is the canonical scaling (mean-subtraction on [0, 255]
+    # pixels), so a prior normalize to [0, 1] would be both redundant and wrong —
+    # the vgg16 path casts back to uint8 and a [0, 1] image truncates to black.
+    # Standardization of the *embedding* is what 'scale' provides at the end.
+    # ----------------------------------------------------------------------
+
+    @staticmethod
+    def embedding_pca_pipeline() -> ImagePipeline:
+        """VGG16 embedding reduced with PCA, then standardized.
+
+        The 224x224 grayscale image is embedded via the VGG16 block5 features
+        (25,088-dim), compressed with PCA (``vec-pca``) to 150 components, and
+        standardized. PCA keeps the directions of maximum variance in the
+        embedding space. No pre-embedding normalize — VGG16 handles its own input
+        scaling (see the block comment above).
+
+        Output: 150 standardized PCA features per image (VGG16 embedding).
+        """
+        return ImagePipeline([
+            ('grayscale', {}),
+            ('resize', {'target_size': (224, 224), 'preserve_aspect': True}),
+            ('vectorize', {'method': 'vgg16'}),
+            ('reduce', {'method': 'vec-pca', 'n_components': 150, 'random_state': RANDOM_STATE}),
+            ('scale', {}),
+        ])
+
+    @staticmethod
+    def embedding_jl_pipeline() -> ImagePipeline:
+        """VGG16 embedding reduced with a JL random projection, then standardized.
+
+        Identical to :meth:`embedding_pca_pipeline` except the reduce step uses a
+        data-independent Johnson-Lindenstrauss projection (``vec-jl``) to 150
+        components instead of PCA, so an A/B run isolates the reduction method on
+        top of the same deep features.
+
+        Output: 150 standardized JL-projected features per image (VGG16 embedding).
+        """
+        return ImagePipeline([
+            ('grayscale', {}),
+            ('resize', {'target_size': (224, 224), 'preserve_aspect': True}),
+            ('vectorize', {'method': 'vgg16'}),
+            ('reduce', {'method': 'vec-jl', 'n_components': 150, 'random_state': RANDOM_STATE}),
+            ('scale', {}),
         ])
 
     # ----------------------------------------------------------------------

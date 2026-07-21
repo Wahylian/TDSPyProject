@@ -30,8 +30,9 @@ from typing import Callable, Dict, List, Optional, Tuple
 # -- sk-learn ----------------------------------------------------------------
 from sklearn.base import BaseEstimator
 from sklearn.dummy import DummyClassifier
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
 from sklearn.linear_model import LogisticRegression, RidgeClassifier
+from sklearn.neural_network import MLPClassifier
 from sklearn.svm import SVC, LinearSVC
 
 # -- Constants ---------------------------------------------------------------
@@ -126,6 +127,27 @@ MODEL_REGISTRY: Dict[str, ModelSpec] = {
     "linreg": ModelSpec(
         factory=lambda: ThresholdedLinearRegression(random_state=RANDOM_STATE),
         param_grid={"clf__fit_intercept": [True, False]},
+    ),
+    # Histogram-based gradient boosting — the boosting counterpart to the
+    # bagging Random Forest, and a strong non-linear baseline on the PCA
+    # features. Fast (binned splits) and scale-insensitive like the forest.
+    "hgb": ModelSpec(
+        factory=lambda: HistGradientBoostingClassifier(random_state=RANDOM_STATE),
+        param_grid={
+            "clf__learning_rate": [0.05, 0.1],
+            "clf__max_iter": [100, 200],
+        },
+    ),
+    # Multi-layer perceptron — the project's iterative sklearn model. It fits by
+    # gradient descent and exposes ``loss_curve_`` (per-epoch training loss), the
+    # hook for a per-epoch training-history diagnostic. max_iter is raised so the
+    # small feature splits converge without a ConvergenceWarning.
+    "mlp": ModelSpec(
+        factory=lambda: MLPClassifier(max_iter=500, random_state=RANDOM_STATE),
+        param_grid={
+            "clf__alpha": [1e-4, 1e-3],
+            "clf__hidden_layer_sizes": [(100,), (64, 32)],
+        },
     ),
 }
 

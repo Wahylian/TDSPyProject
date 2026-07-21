@@ -27,10 +27,13 @@ from prebuilt_pipelines import PrebuiltPipelines
 # Every zero-argument factory on PrebuiltPipelines, named for parametrize ids.
 NULLARY_FACTORIES = [
     "svm_pipeline",
+    "svm_jl_pipeline",
     "fast_pipeline",
     "hq_pipeline",
     "no_denoise_pipeline",
     "fast_embedding_pipeline",
+    "embedding_pca_pipeline",
+    "embedding_jl_pipeline",
     "reduction_bypass_pipeline",
     "vec_pca_pipeline",
     "vec_jl_pipeline",
@@ -112,6 +115,25 @@ class TestPipelineStructure:
         reduce_kwargs = ops[names.index("reduce")][1]
         assert reduce_kwargs.get("method") == "vec-pca"
 
+    def test_svm_jl_pipeline_mirrors_svm_but_uses_jl_reduce(self):
+        """``svm_jl_pipeline`` matches ``svm_pipeline`` stage-for-stage but reduces with JL.
+
+        The two share the same per-image front-end and trailing ``scale`` so an
+        A/B run isolates the reduction method; only the reduce stage differs
+        (``vec-jl`` here vs ``vec-pca`` in ``svm_pipeline``).
+        """
+        # Act
+        jl_ops = PrebuiltPipelines.svm_jl_pipeline().operations
+        svm_ops = PrebuiltPipelines.svm_pipeline().operations
+        jl_names = [n for n, _ in jl_ops]
+        # Assert: identical stage sequence, ending in scale after the reduce.
+        assert jl_names == [n for n, _ in svm_ops]
+        assert jl_names[-1] == "scale"
+        assert jl_names.index("vectorize") < jl_names.index("reduce") < jl_names.index("scale")
+        # The reduce stage is a JL random projection, not PCA.
+        reduce_kwargs = jl_ops[jl_names.index("reduce")][1]
+        assert reduce_kwargs.get("method") == "vec-jl"
+
     def test_fast_embedding_pipeline_uses_vgg16_vectorize(self):
         """The embedding pipeline's vectorize stage requests the VGG16 method.
 
@@ -124,6 +146,31 @@ class TestPipelineStructure:
         name, kwargs = ops[-1]
         assert name == "vectorize"
         assert kwargs.get("method") == "vgg16"
+
+    @pytest.mark.parametrize(
+        "factory_name,expected_method",
+        [("embedding_pca_pipeline", "vec-pca"), ("embedding_jl_pipeline", "vec-jl")],
+    )
+    def test_embedding_pipelines_vgg16_then_reduce_then_scale(
+        self, factory_name, expected_method
+    ):
+        """Embedding pipelines embed with VGG16, then reduce (PCA/JL) then scale.
+
+        Both variants share the same VGG16 front-end and trailing ``scale`` and
+        differ only in the reduce method, so an A/B run isolates the reduction.
+
+        Args:
+            factory_name: An embedding factory name from the sweep.
+            expected_method: The reduce method that factory should configure.
+        """
+        # Act
+        ops = getattr(PrebuiltPipelines, factory_name)().operations
+        names = [n for n, _ in ops]
+        # Assert: vgg16 vectorize, then the reduce, then scale, in that order.
+        assert ops[names.index("vectorize")][1].get("method") == "vgg16"
+        assert names.index("vectorize") < names.index("reduce") < names.index("scale")
+        assert names[-1] == "scale"
+        assert ops[names.index("reduce")][1].get("method") == expected_method
 
     def test_reduction_bypass_pipeline_has_none_reduce_tail(self):
         """The bypass pipeline vectorizes then carries a ``reduce(method=None)`` tail."""

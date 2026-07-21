@@ -160,6 +160,37 @@ class TestNewClassicalModels:
         assert acc > 0.8
 
 
+class TestHistGradientBoosting:
+    """The added histogram-based gradient boosting estimator (hgb)."""
+
+    def test_hgb_is_hist_gradient_boosting(self):
+        from sklearn.ensemble import HistGradientBoostingClassifier
+        assert isinstance(MODEL_REGISTRY["hgb"].factory(), HistGradientBoostingClassifier)
+
+
+class TestMLP:
+    """The added iterative multi-layer perceptron estimator (mlp)."""
+
+    def test_mlp_is_mlp_classifier(self):
+        from sklearn.neural_network import MLPClassifier
+        assert isinstance(MODEL_REGISTRY["mlp"].factory(), MLPClassifier)
+
+    def test_mlp_exposes_loss_curve_after_fit(self, feature_split):
+        """The MLP fits by gradient descent and records per-epoch loss.
+
+        ``loss_curve_`` is the hook for a future per-epoch training-history
+        diagnostic, so pin that a fitted ``mlp`` exposes it.
+        """
+        est = MODEL_REGISTRY["mlp"].factory()
+        est.fit(feature_split.X_train, feature_split.y_train)
+        assert hasattr(est, "loss_curve_") and len(est.loss_curve_) >= 1
+
+    def test_mlp_separates_feature_split(self, feature_split):
+        est = MODEL_REGISTRY["mlp"].factory()
+        est.fit(feature_split.X_train, feature_split.y_train)
+        assert est.score(feature_split.X_test, feature_split.y_test) > 0.8
+
+
 class TestConditionalTorchRegistration:
     """cnn/vit register only when torch is importable."""
 
