@@ -183,6 +183,30 @@ class TestPipelineStructure:
         assert ops[-1][1].get("n_components") == 17
 
 
+class TestPixelPipelines:
+    """No-PCA pixel pipelines that feed the raw-image torch models."""
+
+    def test_pixels_pipeline_emits_flat_4096_no_reduce(self, image_batch):
+        from prebuilt_pipelines import PrebuiltPipelines
+        pipe = PrebuiltPipelines.pixels_pipeline()
+        X = pipe.fit_transform(image_batch)
+        assert X.ndim == 2 and X.shape[1] == 64 * 64
+        assert 0.0 <= float(X.min()) and float(X.max()) <= 1.0
+        ops = [name for name, _ in pipe.operations]
+        assert "reduce" not in ops and "scale" not in ops
+
+    def test_pixels_hq_pipeline_emits_flat_16384(self, image_batch):
+        from prebuilt_pipelines import PrebuiltPipelines
+        pipe = PrebuiltPipelines.pixels_hq_pipeline()
+        X = pipe.fit_transform(image_batch)
+        assert X.ndim == 2 and X.shape[1] == 128 * 128
+
+    def test_both_registered(self):
+        from trainbase.pipeline_registry import PIPELINE_REGISTRY
+        assert "pixels" in PIPELINE_REGISTRY
+        assert "pixels_hq" in PIPELINE_REGISTRY
+
+
 class TestPipelineExecution:
     """A representative subset run end-to-end through ``batch_process``."""
 

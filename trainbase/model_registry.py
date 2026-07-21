@@ -1,11 +1,11 @@
 """
-Helper For 'train_model.py' 
+Helper For 'train_model.py'
 
 Contains the Registry for ML models that the project can train on.
 
-How to add a new classifier to the model Registry (Example): 
+How to add a new classifier to the model Registry (Example):
     To add a Gradiant Boosting model:
-    1. Import it at the top of the file 
+    1. Import it at the top of the file
     2. Add an entry of the following structure to the MODEL_REGISTRY:
         "gb" :  ModelSpec(
                factory=lambda: GradientBoostingClassifier(random_state=RANDOM_STATE),
@@ -15,6 +15,11 @@ How to add a new classifier to the model Registry (Example):
 
     Grid keys are prefixed with ``clf__`` because the estimator is the ``"clf"`` step of the sklearn
     ``Pipeline`` (see ``build_estimator``).
+
+    The registry also carries optional deep models — ``cnn``/``cnn_deep`` and
+    ``vit``/``vit_deep`` — which are registered only when PyTorch is installed
+    (see ``trainbase/torch_models.py``). Pair them with a raw-pixel pipeline:
+    ``--model cnn --pipeline pixels`` (or ``--model cnn_deep --pipeline pixels_hq``).
 """
 
 
@@ -26,8 +31,8 @@ from typing import Callable, Dict, List, Optional, Tuple
 from sklearn.base import BaseEstimator
 from sklearn.dummy import DummyClassifier
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.linear_model import LogisticRegression
-from sklearn.svm import SVC
+from sklearn.linear_model import LogisticRegression, RidgeClassifier
+from sklearn.svm import SVC, LinearSVC
 
 # -- Constants ---------------------------------------------------------------
 
@@ -60,6 +65,8 @@ class ModelSpec:
 # To add a new classifier: import it above, then add one entry here. Nothing
 # else in the script needs to change — selection is purely by the ``--model``
 # flag, and the PCA->scale feature front-end / tuning / evaluation are shared.
+from .linear_models import ThresholdedLinearRegression
+
 MODEL_REGISTRY: Dict[str, ModelSpec] = {
     # Soft-margin kernel SVM — the focus of this script.
     #   * C       : soft-margin strength (low C = wider margin, more tolerant).
@@ -95,4 +102,42 @@ MODEL_REGISTRY: Dict[str, ModelSpec] = {
         ),
         param_grid={"clf__C": [0.1, 1.0, 10.0]},
     ),
+    # Hard-margin SVM — a huge C drives the soft margin toward the hard-margin
+    # limit (no slack). LinearSVC is the fast, purpose-built linear realization;
+    # it exposes decision_function for ROC/PR-AUC.
+    "hard_svm": ModelSpec(
+        factory=lambda: LinearSVC(C=1e6, random_state=RANDOM_STATE),
+        param_grid={"clf__C": [1e4, 1e6]},
+    ),
+    # Same hard margin via the kernel SVC with a linear kernel — mirrors the
+    # existing 'svm' entry's style for a like-for-like comparison.
+    "hard_svm_kernel": ModelSpec(
+        factory=lambda: SVC(kernel="linear", C=1e6, random_state=RANDOM_STATE),
+        param_grid={"clf__C": [1e4, 1e6]},
+    ),
+    # Ridge (least-squares) classifier — "linear regression as a classifier":
+    # it regresses the class targets and thresholds. Exposes decision_function.
+    "ridge": ModelSpec(
+        factory=lambda: RidgeClassifier(random_state=RANDOM_STATE),
+        param_grid={"clf__alpha": [0.1, 1.0, 10.0]},
+    ),
+    # Plain linear regression used as a classifier: regress 0/1 targets and
+    # threshold at 0.5. The most literal "linear regression" baseline.
+    "linreg": ModelSpec(
+        factory=lambda: ThresholdedLinearRegression(random_state=RANDOM_STATE),
+        param_grid={"clf__fit_intercept": [True, False]},
+    ),
 }
+
+
+# --- Optional deep models (CNN / ViT) -------------------------------------
+# Registered only when torch is importable, so the project imports and runs
+# unchanged without the optional PyTorch dependency. Membership is dynamic by
+# design (see the package docstring): with torch installed, `--model cnn/vit`
+# become available automatically.
+try:
+    from .torch_models import build_torch_registry
+
+    MODEL_REGISTRY.update(build_torch_registry())
+except ImportError:  # pragma: no cover - exercised only when torch is absent
+    pass

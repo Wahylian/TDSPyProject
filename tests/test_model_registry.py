@@ -130,3 +130,48 @@ class TestParamGrids:
         a.param_grid["clf__C"] = [1.0]
         # b's default grid is untouched by mutating a's.
         assert b.param_grid == {}
+
+
+class TestNewClassicalModels:
+    """The added classical estimators and their realizations."""
+
+    def test_hard_svm_is_linearsvc_with_large_C(self):
+        from sklearn.svm import LinearSVC
+        est = MODEL_REGISTRY["hard_svm"].factory()
+        assert isinstance(est, LinearSVC)
+        assert est.get_params()["C"] >= 1e4
+
+    def test_hard_svm_kernel_is_linear_svc_large_C(self):
+        from sklearn.svm import SVC
+        est = MODEL_REGISTRY["hard_svm_kernel"].factory()
+        assert isinstance(est, SVC)
+        params = est.get_params()
+        assert params["kernel"] == "linear" and params["C"] >= 1e4
+
+    def test_ridge_is_ridge_classifier(self):
+        from sklearn.linear_model import RidgeClassifier
+        assert isinstance(MODEL_REGISTRY["ridge"].factory(), RidgeClassifier)
+
+    def test_hard_svm_separates_and_exposes_decision_function(self, feature_split):
+        est = MODEL_REGISTRY["hard_svm"].factory()
+        est.fit(feature_split.X_train, feature_split.y_train)
+        assert hasattr(est, "decision_function")
+        acc = est.score(feature_split.X_test, feature_split.y_test)
+        assert acc > 0.8
+
+
+class TestConditionalTorchRegistration:
+    """cnn/vit register only when torch is importable."""
+
+    def test_torch_models_present_iff_torch(self):
+        torch_installed = True
+        try:
+            import torch  # noqa: F401
+        except ImportError:
+            torch_installed = False
+        torch_keys = {"cnn", "cnn_deep", "vit", "vit_deep"}
+        present = torch_keys & set(MODEL_REGISTRY)
+        if torch_installed:
+            assert present == torch_keys
+        else:
+            assert present == set()

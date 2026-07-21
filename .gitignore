@@ -1,9 +1,26 @@
+# Virtual environments
 /venv
 /.venv
+
+# Python caches / build
 **/__pycache__/
-.claude
-.git
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+
+# Editors / IDEs
 .idea
+.claude
+
+# Tooling scratch (Serena MCP config/cache; Superpowers workflow ledger).
+# Specs/plans are committed under Docs/ and are intentionally NOT ignored.
+.serena/
+.superpowers/
+
+# Local project memory
 MEMORY.md
-\datasets
-\feature_cache
+
+# Datasets and generated outputs
+/datasets/
+/feature_cache/
+/artifacts/
