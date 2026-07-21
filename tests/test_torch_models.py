@@ -6,6 +6,8 @@ synthetic pixel split with 1 epoch so it stays fast and deterministic.
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 import pytest
 
@@ -90,6 +92,32 @@ def test_learns_separable_pixels(pixel_split):
         pixel_split.X_train, pixel_split.y_train)
     acc = (est.predict(pixel_split.X_test) == pixel_split.y_test).mean()
     assert acc > 0.75
+
+
+@pytest.mark.parametrize("Model", MODELS)
+def test_device_auto_selects_gpu_when_available(Model, monkeypatch):
+    """With ``device=None`` and a GPU present, training targets CUDA (no warning)."""
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")  # any warning would fail here
+        assert Model()._device().type == "cuda"
+
+
+@pytest.mark.parametrize("Model", MODELS)
+def test_device_falls_back_to_cpu_with_warning(Model, monkeypatch):
+    """With ``device=None`` and no GPU, training falls back to CPU and warns."""
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    with pytest.warns(UserWarning, match="CPU"):
+        assert Model()._device().type == "cpu"
+
+
+@pytest.mark.parametrize("Model", MODELS)
+def test_explicit_device_is_honored_silently(Model, monkeypatch):
+    """An explicit ``device`` is used as-is, with no GPU probing or warning."""
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert Model(device="cpu")._device().type == "cpu"
 
 
 def test_build_torch_registry_shape():

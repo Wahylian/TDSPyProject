@@ -18,6 +18,7 @@ inferred as square grayscale from the vector width.
 
 from __future__ import annotations
 
+import warnings
 from typing import Dict, Optional, Tuple
 
 import numpy as np
@@ -85,7 +86,21 @@ class _TorchImageClassifier(BaseEstimator, ClassifierMixin):
         raise NotImplementedError
 
     def _device(self) -> "torch.device":
-        return torch.device(self.device) if self.device is not None else torch.device("cpu")
+        """Resolve the training device.
+
+        Honors an explicit ``device``; otherwise auto-selects a CUDA GPU when
+        one is available and falls back to CPU with a warning (training on CPU
+        may be slow).
+        """
+        if self.device is not None:
+            return torch.device(self.device)
+        if torch.cuda.is_available():
+            return torch.device("cuda")
+        warnings.warn(
+            "No CUDA GPU available; training on CPU (this may be slow).",
+            stacklevel=2,
+        )
+        return torch.device("cpu")
 
     # --- sklearn API ------------------------------------------------------
     def fit(self, X, y):

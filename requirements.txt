@@ -11,11 +11,13 @@ joblib
 # keras
 # tensorflow
 
-# Optional: CNN / ViT deep models (trainbase/torch_models.py). CPU wheels are
-# fine; only needed if you run --model cnn/cnn_deep/vit/vit_deep. Install with:
-#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-# torch
-# torchvision
+# CNN / ViT deep models (trainbase/torch_models.py). GPU (CUDA) build: cu126 is
+# the industry-standard CUDA 12.6 toolkit (<= 13.2) and ships torch 2.13.0. The
+# extra index hosts the +cu126 wheels; every other package resolves from PyPI.
+# CPU-only box? Use  https://download.pytorch.org/whl/cpu  with  torch==2.13.0+cpu
+--extra-index-url https://download.pytorch.org/whl/cu126
+torch==2.13.0+cu126
+# torchvision is not imported by this project; add it (matching +cu126) only if needed.
 
 # Optional: dataset download (download_dataset.py).
 # kagglehub
