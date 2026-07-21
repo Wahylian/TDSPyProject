@@ -1,0 +1,33 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        # Core runtime deps + pytest, plus keras and a CPU TensorFlow backend so
+        # the VGG16 embedding tests run (they only need keras.preprocess_input;
+        # the fake_vgg16 fixture stubs the model, so no ImageNet weights are
+        # downloaded). The headless OpenCV build avoids needing system GUI
+        # libraries on the runner. The CPU torch wheel (from the pytorch CPU
+        # index, not the CUDA build pinned in requirements.txt) lets the
+        # torch-backed CNN/ViT model tests run instead of skipping.
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy pandas opencv-python-headless Pillow scikit-learn joblib pytest
+          pip install keras tensorflow-cpu
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Run tests
+        run: pytest

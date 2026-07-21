@@ -41,10 +41,10 @@ explicit and there is exactly one hop from this file to the real implementation:
     reduce_dimensions          preprocessing/reduce.py       Batch-level: vector / matrix / bypass
     standardize_features       preprocessing/scale.py        Batch-level: per-feature standardize
     ImagePipeline              preprocessing/pipeline.py     Config-driven op chain
-    batch_process              preprocessing/pipeline.py     Run a pipeline over many images
-    compose                    preprocessing/pipeline.py     Right-to-left functional compose
-    pipeline_decorator         preprocessing/pipeline.py     Decorator-style preprocessing
-    BATCH_LEVEL_OPS            preprocessing/pipeline.py     Set of ops that run on a batch
+    batch_process              preprocessing/batching.py     Run a pipeline over many images
+    compose                    preprocessing/composition.py  Right-to-left functional compose
+    pipeline_decorator         preprocessing/composition.py  Decorator-style preprocessing
+    BATCH_LEVEL_OPS            preprocessing/operations.py   Set of ops that run on a batch
     load_image_from_bytes      preprocessing/io.py           I/O: raw bytes  -> ndarray (RGB)
     load_image_from_file       preprocessing/io.py           I/O: file path  -> ndarray (BGR)
     load_image_from_pil        preprocessing/io.py           I/O: PIL.Image  -> ndarray
@@ -147,14 +147,17 @@ from preprocessing.reduce import reduce_dimensions
 # --- Batch-level feature standardization .......... preprocessing/scale.py
 from preprocessing.scale import standardize_features
 
-# --- Pipeline composition & batching .............. preprocessing/pipeline.py
-from preprocessing.pipeline import (
-    BATCH_LEVEL_OPS,
-    ImagePipeline,
-    batch_process,
-    compose,
-    pipeline_decorator,
-)
+# --- Operation registry ........................... preprocessing/operations.py
+from preprocessing.operations import BATCH_LEVEL_OPS
+
+# --- Config-driven pipeline chain ................. preprocessing/pipeline.py
+from preprocessing.pipeline import ImagePipeline
+
+# --- Batch execution of a pipeline ................ preprocessing/batching.py
+from preprocessing.batching import batch_process
+
+# --- Functional composition helpers ............... preprocessing/composition.py
+from preprocessing.composition import compose, pipeline_decorator
 
 # --- Image I/O helpers ............................ preprocessing/io.py
 from preprocessing.io import (

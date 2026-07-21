@@ -102,6 +102,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -128,14 +129,22 @@ logger = logging.getLogger("train_model")
 def _cache_prefix(args: argparse.Namespace) -> str:
     """Derive the feature-cache key for this run's feature space.
 
-    A registry pipeline is fully identified by its name. A custom
-    ``--pipeline-spec`` is keyed by a short hash of its JSON, so distinct custom
-    pipelines never collide in the cache (and an identical spec reuses it).
+    Both sources key on a short hash of the *fully-resolved* pipeline definition,
+    so editing the underlying operation list invalidates any stale cache instead
+    of silently reusing features from the old definition:
+
+    * A custom ``--pipeline-spec`` hashes its JSON directly.
+    * A registry pipeline hashes its resolved operation list (name + kwargs),
+      keeping the readable pipeline name as a prefix.
     """
     if args.pipeline_spec is not None:
         digest = hashlib.sha1(args.pipeline_spec.encode("utf-8")).hexdigest()[:10]
         return f"custom_{digest}"
-    return args.pipeline
+    operations = PIPELINE_REGISTRY[args.pipeline]().operations
+    digest = hashlib.sha1(
+        json.dumps(operations, sort_keys=True, default=str).encode("utf-8")
+    ).hexdigest()[:10]
+    return f"{args.pipeline}_{digest}"
 
 
 def main(args: argparse.Namespace) -> None:
