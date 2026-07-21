@@ -1,0 +1,27 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        # Core runtime deps + pytest. Torch is optional (its tests skip when it
+        # is absent), and the headless OpenCV build avoids needing system GUI
+        # libraries on the runner.
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy pandas opencv-python-headless Pillow scikit-learn joblib pytest
+
+      - name: Run tests
+        run: pytest

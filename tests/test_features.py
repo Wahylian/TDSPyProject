@@ -298,39 +298,87 @@ class TestTransformFeatures:
     def test_no_cache_transforms_split(self, image_label_pairs):
         """With ``cache_dir=None`` the fitted pipeline's ``transform`` is applied.
 
+        The split is streamed in bounded batches; here a single batch carries all
+        three images, so ``transform`` is invoked once with that batch and its
+        output flows straight back (concatenation of one part).
+
         Args:
-            image_label_pairs: source pairs for the mocked loader (fixture).
+            image_label_pairs: source pairs for the mocked stream (fixture).
         """
         X_out = np.ones((3, 2), dtype=np.float32)
         pipe = _stub_pipeline(X_out)
         images = [img for img, _ in image_label_pairs][:3]
-        y = np.array([0, 1, 0], dtype=int)
+        labels = [0, 1, 0]
 
         with mock.patch(
-            "trainbase.features.load_images", return_value=(images, y)
-        ) as load:
+            "trainbase.features._stream_feature_batches",
+            return_value=iter([(images, labels)]),
+        ) as stream:
             X, out_y = transform_features(
                 "val", pipe, max_samples=3, cache_dir=None, cache_prefix="cfg"
             )
 
-        load.assert_called_once_with("val", 3)
+        stream.assert_called_once_with("val", 3)
         pipe.transform.assert_called_once_with(images)
         np.testing.assert_array_equal(X, X_out)
-        np.testing.assert_array_equal(out_y, y)
+        np.testing.assert_array_equal(out_y, np.asarray(labels, dtype=int))
+
+    def test_batches_are_transformed_and_concatenated(self, image_label_pairs):
+        """Multiple streamed batches are each transformed and concatenated in order.
+
+        Proves the bounded-memory path: two batches produce two ``transform``
+        calls whose outputs (and labels) are concatenated, matching a
+        whole-split transform.
+
+        Args:
+            image_label_pairs: source pairs for the mocked stream (fixture).
+        """
+        imgs = [img for img, _ in image_label_pairs]
+        batch1 = (imgs[:2], [0, 1])
+        batch2 = (imgs[2:5], [0, 1, 0])
+        pipe = mock.Mock(spec=ImagePipeline)
+        pipe.transform.side_effect = [
+            np.array([[1.0], [2.0]], dtype=np.float32),
+            np.array([[3.0], [4.0], [5.0]], dtype=np.float32),
+        ]
+
+        with mock.patch(
+            "trainbase.features._stream_feature_batches",
+            return_value=iter([batch1, batch2]),
+        ):
+            X, y = transform_features(
+                "test", pipe, max_samples=0, cache_dir=None, cache_prefix="cfg"
+            )
+
+        assert pipe.transform.call_count == 2
+        np.testing.assert_array_equal(X, np.array([[1.0], [2.0], [3.0], [4.0], [5.0]], dtype=np.float32))
+        np.testing.assert_array_equal(y, np.array([0, 1, 0, 1, 0], dtype=int))
+
+    def test_empty_stream_raises_runtime_error(self):
+        """A split that yields no batches is a ``RuntimeError``, not a silent empty."""
+        pipe = _stub_pipeline(np.zeros((1, 1), dtype=np.float32))
+        with mock.patch(
+            "trainbase.features._stream_feature_batches", return_value=iter([])
+        ):
+            with pytest.raises(RuntimeError, match="No usable images"):
+                transform_features(
+                    "test", pipe, max_samples=0, cache_dir=None, cache_prefix="cfg"
+                )
 
     def test_cache_miss_writes_split_features(self, tmp_path, image_label_pairs):
         """A cache miss saves the split's features to a per-split npz.
 
         Args:
             tmp_path: pytest temp dir used as the cache (fixture).
-            image_label_pairs: source pairs for the mocked loader (fixture).
+            image_label_pairs: source pairs for the mocked stream (fixture).
         """
         pipe = _stub_pipeline(np.ones((3, 2), dtype=np.float32))
         images = [img for img, _ in image_label_pairs][:3]
-        y = np.array([0, 1, 0], dtype=int)
+        labels = [0, 1, 0]
 
         with mock.patch(
-            "trainbase.features.load_images", return_value=(images, y)
+            "trainbase.features._stream_feature_batches",
+            return_value=iter([(images, labels)]),
         ), mock.patch("trainbase.features.np.savez_compressed") as savez:
             transform_features(
                 "test", pipe, max_samples=3, cache_dir=tmp_path, cache_prefix="cfg"
@@ -352,8 +400,8 @@ class TestTransformFeatures:
 
         pipe = _stub_pipeline(np.zeros((1, 1), dtype=np.float32))
         with mock.patch(
-            "trainbase.features.load_images",
-            side_effect=AssertionError("must not reload images on a cache hit"),
+            "trainbase.features._stream_feature_batches",
+            side_effect=AssertionError("must not restream images on a cache hit"),
         ):
             X, y = transform_features(
                 split, pipe, max_samples=n, cache_dir=tmp_path, cache_prefix=prefix

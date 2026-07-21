@@ -27,7 +27,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Generator, List, Optional, Tuple
 
 import numpy as np
 import joblib
@@ -143,12 +143,56 @@ def _parse_pipeline_spec(spec: str) -> List[Tuple[str, Dict[str, Any]]]:
 # =============================================================================
 # Data loading & feature extraction
 # =============================================================================
+
+# Number of decoded images held in memory per streamed batch. Bounds peak RAM
+# for the batched feature paths independently of the split size.
+FEATURE_BATCH_SIZE = 512
+
+
+def _stream_feature_batches(
+    split: str, max_samples: int, batch_size: int = FEATURE_BATCH_SIZE
+) -> Generator[Tuple[List[np.ndarray], List[int]], None, None]:
+    """Yield ``(images, labels)`` chunks of at most ``batch_size`` from the stream.
+
+    Consumes :func:`extract_features.get_feature_stream` (a seeded, shuffled
+    ``(image, label)`` stream) and groups its pairs into bounded batches, so at
+    most ``batch_size`` decoded images coexist in memory regardless of how large
+    the split is. The ``max_samples`` cap (``0`` = all) is honoured across
+    batches.
+
+    Args:
+        split: One of ``"train"``, ``"val"``, ``"test"``.
+        max_samples: Cap on the number of images to read; ``0`` means "all".
+        batch_size: Maximum decoded images per yielded batch.
+
+    Yields:
+        ``(images, labels)`` — a list of decoded BGR image arrays (length
+        ``<= batch_size``) and the aligned list of int labels.
+    """
+    images: List[np.ndarray] = []
+    labels: List[int] = []
+    total = 0
+    for image, label in get_feature_stream(split, random_seed=RANDOM_STATE):
+        images.append(image)
+        labels.append(label)
+        total += 1
+        if len(images) >= batch_size:
+            yield images, labels
+            images, labels = [], []
+        if max_samples and total >= max_samples:
+            break
+    if images:
+        yield images, labels
+
+
 def load_images(split: str, max_samples: int = 0) -> Tuple[List[np.ndarray], np.ndarray]:
     """Stream one split's raw images + labels into memory (subsampled).
 
     Images come from :func:`extract_features.get_feature_stream`, which yields
     ``(image, label)`` pairs in a seeded, shuffled order — so taking the first
-    ``max_samples`` items is an unbiased random subsample.
+    ``max_samples`` items is an unbiased random subsample. Decoding happens in
+    bounded batches (see :func:`_stream_feature_batches`), though the full split
+    is materialized in the returned list.
 
     Args:
         split: One of ``"train"``, ``"val"``, ``"test"``.
@@ -164,13 +208,10 @@ def load_images(split: str, max_samples: int = 0) -> Tuple[List[np.ndarray], np.
     """
     images: List[np.ndarray] = []
     labels: List[int] = []
-    for image, label in get_feature_stream(split, random_seed=RANDOM_STATE):
-        images.append(image)
-        labels.append(label)
-        if len(images) % 1000 == 0:
-            logger.info("  ... %d images loaded", len(images))
-        if max_samples and len(images) >= max_samples:
-            break
+    for batch_images, batch_labels in _stream_feature_batches(split, max_samples):
+        images.extend(batch_images)
+        labels.extend(batch_labels)
+        logger.info("  ... %d images loaded", len(images))
 
     if not images:
         raise RuntimeError(f"No usable images found for split '{split}'.")
@@ -241,10 +282,26 @@ def transform_features(
             data = np.load(cache_path)
             return data["X"], data["y"]
 
-    images, y = load_images(split, max_samples)
-    logger.info("Transforming %d '%s' images with the fitted pipeline...", len(images), split)
-    X = pipeline.transform(images)
-    logger.info("  -> %s features %s", split, X.shape)
+    # Stream the split in bounded batches: transform each batch with the
+    # already-fitted pipeline and concatenate the (small) reduced outputs. Only
+    # one batch of decoded images is held at a time, so peak RAM is independent
+    # of the split size. Because transform() reuses the fitted reducer/scaler
+    # (a fixed per-sample projection), per-batch results are identical to
+    # transforming the whole split at once.
+    X_parts: List[np.ndarray] = []
+    y_parts: List[np.ndarray] = []
+    total = 0
+    for images, labels in _stream_feature_batches(split, max_samples):
+        X_parts.append(pipeline.transform(images))
+        y_parts.append(np.asarray(labels, dtype=int))
+        total += len(images)
+
+    if not X_parts:
+        raise RuntimeError(f"No usable images found for split '{split}'.")
+
+    X = np.concatenate(X_parts)
+    y = np.concatenate(y_parts)
+    logger.info("Transformed %d '%s' images with the fitted pipeline -> %s", total, split, X.shape)
 
     if cache_path is not None:
         np.savez_compressed(cache_path, X=X, y=y)
