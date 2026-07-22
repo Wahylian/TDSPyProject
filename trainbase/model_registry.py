@@ -73,7 +73,7 @@ MODEL_REGISTRY: Dict[str, ModelSpec] = {
     ),
     # Same hard margin via the kernel SVC with a linear kernel, for a like-for-like compare.
     "hard_svm_kernel": ModelSpec(
-        factory=lambda: SVC(kernel="linear", C=1e6, random_state=RANDOM_STATE),
+        factory=lambda: SVC(kernel="linear", C=1e6, max_iter=10_000, random_state=RANDOM_STATE),
         param_grid={"clf__C": [1e4, 1e6]},
     ),
     # Least-squares classifier: regresses the class targets and thresholds.
