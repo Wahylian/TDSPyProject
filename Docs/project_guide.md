@@ -68,8 +68,9 @@ pip install -r requirements.txt
 ```
 
 Core dependencies: `numpy`, `pandas`, `opencv-python`, `Pillow`, `scikit-learn`,
-`joblib`. Optional extras (commented in `requirements.txt`): `keras`/`tensorflow`
-for VGG16 embeddings, `kagglehub` for the dataset download, `pytest` for tests.
+`joblib`. Optional extras (commented in `requirements.txt`): `keras` for VGG16
+embeddings (runs on the torch backend — no tensorflow needed), `kagglehub` for
+the dataset download, `pytest` for tests.
 
 The project uses a flat layout (`pytest.ini` sets `pythonpath = .`), so no
 installation step is needed — run scripts from the project root.

@@ -1,0 +1,193 @@
+{
+  "model_name": "svm",
+  "run_id": "20260722_142924",
+  "timestamp": "2026-07-22T14:29:24",
+  "pipeline_used": "embedding_pca",
+  "pipeline_spec": null,
+  "pipeline_steps": [
+    [
+      "grayscale",
+      {}
+    ],
+    [
+      "resize",
+      {
+        "target_size": [
+          224,
+          224
+        ],
+        "preserve_aspect": true
+      }
+    ],
+    [
+      "vectorize",
+      {
+        "method": "vgg16"
+      }
+    ],
+    [
+      "reduce",
+      {
+        "method": "vec-pca",
+        "n_components": 150,
+        "random_state": 42
+      }
+    ],
+    [
+      "scale",
+      {}
+    ]
+  ],
+  "scoring": "f1",
+  "sample_sizes": {
+    "train": 5000,
+    "val": 2000,
+    "test": 5000
+  },
+  "hyperparameters": {
+    "clf__C": 10.0,
+    "clf__gamma": "scale",
+    "clf__kernel": "rbf"
+  },
+  "best_val_score": 0.8164754953076121,
+  "evaluation_metrics": {
+    "accuracy": 0.8298,
+    "precision": 0.7970772442588726,
+    "recall": 0.8394898856640282,
+    "pr_auc": 0.8926896359116351,
+    "roc_auc": 0.9118889020094456
+  },
+  "baseline_metrics": {
+    "accuracy": 0.5452,
+    "precision": 0.0,
+    "recall": 0.0,
+    "pr_auc": 0.4548,
+    "roc_auc": 0.5
+  },
+  "diagnostics": {
+    "confusion_matrix": [
+      [
+        2240,
+        486
+      ],
+      [
+        365,
+        1909
+      ]
+    ],
+    "classification_report": "              precision    recall  f1-score   support\n\n        real       0.86      0.82      0.84      2726\n        fake       0.80      0.84      0.82      2274\n\n    accuracy                           0.83      5000\n   macro avg       0.83      0.83      0.83      5000\nweighted avg       0.83      0.83      0.83      5000\n",
+    "feature_importances": null,
+    "oob_score": null,
+    "hyperparameter_scores": [
+      {
+        "params": {
+          "clf__C": 0.1,
+          "clf__gamma": "scale",
+          "clf__kernel": "rbf"
+        },
+        "mean_val_score": 0.7691489361702127,
+        "std_val_score": 0.0
+      },
+      {
+        "params": {
+          "clf__C": 0.1,
+          "clf__gamma": "scale",
+          "clf__kernel": "linear"
+        },
+        "mean_val_score": 0.7796610169491526,
+        "std_val_score": 0.0
+      },
+      {
+        "params": {
+          "clf__C": 0.1,
+          "clf__gamma": "auto",
+          "clf__kernel": "rbf"
+        },
+        "mean_val_score": 0.7691489361702127,
+        "std_val_score": 0.0
+      },
+      {
+        "params": {
+          "clf__C": 0.1,
+          "clf__gamma": "auto",
+          "clf__kernel": "linear"
+        },
+        "mean_val_score": 0.7796610169491526,
+        "std_val_score": 0.0
+      },
+      {
+        "params": {
+          "clf__C": 1.0,
+          "clf__gamma": "scale",
+          "clf__kernel": "rbf"
+        },
+        "mean_val_score": 0.8140495867768595,
+        "std_val_score": 0.0
+      },
+      {
+        "params": {
+          "clf__C": 1.0,
+          "clf__gamma": "scale",
+          "clf__kernel": "linear"
+        },
+        "mean_val_score": 0.7818277865821447,
+        "std_val_score": 0.0
+      },
+      {
+        "params": {
+          "clf__C": 1.0,
+          "clf__gamma": "auto",
+          "clf__kernel": "rbf"
+        },
+        "mean_val_score": 0.8140495867768595,
+        "std_val_score": 0.0
+      },
+      {
+        "params": {
+          "clf__C": 1.0,
+          "clf__gamma": "auto",
+          "clf__kernel": "linear"
+        },
+        "mean_val_score": 0.7818277865821447,
+        "std_val_score": 0.0
+      },
+      {
+        "params": {
+          "clf__C": 10.0,
+          "clf__gamma": "scale",
+          "clf__kernel": "rbf"
+        },
+        "mean_val_score": 0.8164754953076121,
+        "std_val_score": 0.0
+      },
+      {
+        "params": {
+          "clf__C": 10.0,
+          "clf__gamma": "scale",
+          "clf__kernel": "linear"
+        },
+        "mean_val_score": 0.7824709609292503,
+        "std_val_score": 0.0
+      },
+      {
+        "params": {
+          "clf__C": 10.0,
+          "clf__gamma": "auto",
+          "clf__kernel": "rbf"
+        },
+        "mean_val_score": 0.8164754953076121,
+        "std_val_score": 0.0
+      },
+      {
+        "params": {
+          "clf__C": 10.0,
+          "clf__gamma": "auto",
+          "clf__kernel": "linear"
+        },
+        "mean_val_score": 0.7824709609292503,
+        "std_val_score": 0.0
+      }
+    ],
+    "learning_curve": null
+  }
+}

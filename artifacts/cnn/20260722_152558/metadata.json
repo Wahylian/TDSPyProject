@@ -1,0 +1,95 @@
+{
+  "model_name": "cnn",
+  "run_id": "20260722_152558",
+  "timestamp": "2026-07-22T15:25:58",
+  "pipeline_used": "pixels",
+  "pipeline_spec": null,
+  "pipeline_steps": [
+    [
+      "grayscale",
+      {}
+    ],
+    [
+      "resize",
+      {
+        "target_size": [
+          64,
+          64
+        ],
+        "preserve_aspect": true
+      }
+    ],
+    [
+      "normalize",
+      {
+        "method": "minmax",
+        "value_range": [
+          0.0,
+          1.0
+        ]
+      }
+    ],
+    [
+      "vectorize",
+      {
+        "preserve_structure": false
+      }
+    ]
+  ],
+  "scoring": "f1",
+  "sample_sizes": {
+    "train": 5000,
+    "val": 2000,
+    "test": 5000
+  },
+  "hyperparameters": {
+    "clf__lr": 0.001
+  },
+  "best_val_score": 0.7369565217391304,
+  "evaluation_metrics": {
+    "accuracy": 0.7636,
+    "precision": 0.7532467532467533,
+    "recall": 0.714160070360598,
+    "pr_auc": 0.8128680296592928,
+    "roc_auc": 0.8452834717767148
+  },
+  "baseline_metrics": {
+    "accuracy": 0.5452,
+    "precision": 0.0,
+    "recall": 0.0,
+    "pr_auc": 0.4548,
+    "roc_auc": 0.5
+  },
+  "diagnostics": {
+    "confusion_matrix": [
+      [
+        2194,
+        532
+      ],
+      [
+        650,
+        1624
+      ]
+    ],
+    "classification_report": "              precision    recall  f1-score   support\n\n        real       0.77      0.80      0.79      2726\n        fake       0.75      0.71      0.73      2274\n\n    accuracy                           0.76      5000\n   macro avg       0.76      0.76      0.76      5000\nweighted avg       0.76      0.76      0.76      5000\n",
+    "feature_importances": null,
+    "oob_score": null,
+    "hyperparameter_scores": [
+      {
+        "params": {
+          "clf__lr": 0.001
+        },
+        "mean_val_score": 0.7369565217391304,
+        "std_val_score": 0.0
+      },
+      {
+        "params": {
+          "clf__lr": 0.0003
+        },
+        "mean_val_score": 0.7288693743139407,
+        "std_val_score": 0.0
+      }
+    ],
+    "learning_curve": null
+  }
+}

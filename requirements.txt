@@ -10,12 +10,13 @@ joblib
 pip install numpy pandas opencv-python Pillow scikit-learn joblib
 
 # Optional: VGG16 feature embeddings (preprocessing/vectorize.py). Only needed
-# if you use an embedding-based pipeline; install one Keras backend.
+# if you use an embedding-based pipeline. Keras runs on the torch backend
+# (KERAS_BACKEND=torch is set in preprocessing/__init__.py); tensorflow is not
+# used, so this works natively on Windows with the +cu126 torch below.
 # keras
-# tensorflow
 
-# pip install command  required for VGG16 embeddings
-pip install keras tensorflow
+# pip install command required for VGG16 embeddings
+pip install keras
 
 # CNN / ViT deep models (trainbase/torch_models.py). GPU (CUDA) build: cu126 is
 # the industry-standard CUDA 12.6 toolkit (<= 13.2) and ships torch 2.13.0. The
