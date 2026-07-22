@@ -17,6 +17,13 @@ Key semantics callers must know:
 Optional deps: keras (method='vgg16'), scikit-learn (vec-pca/vec-jl reductions).
 """
 
+import os
+
+# Keras 3 is multi-backend; run it on torch (already a core dependency) instead
+# of tensorflow, which has no native-Windows GPU support. Must be set before
+# the first `import keras` anywhere; an explicit KERAS_BACKEND still wins.
+os.environ.setdefault("KERAS_BACKEND", "torch")
+
 from preprocessing.transforms import (
     normalize_image,
     reduce_noise,
