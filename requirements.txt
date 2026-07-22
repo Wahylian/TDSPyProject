@@ -6,10 +6,16 @@ Pillow
 scikit-learn
 joblib
 
+# pip install command for core dependencies:
+pip install numpy pandas opencv-python Pillow scikit-learn joblib
+
 # Optional: VGG16 feature embeddings (preprocessing/vectorize.py). Only needed
 # if you use an embedding-based pipeline; install one Keras backend.
 # keras
 # tensorflow
+
+# pip install command  required for VGG16 embeddings
+pip install keras tensorflow
 
 # CNN / ViT deep models (trainbase/torch_models.py). GPU (CUDA) build: cu126 is
 # the industry-standard CUDA 12.6 toolkit (<= 13.2) and ships torch 2.13.0. The
@@ -19,8 +25,17 @@ joblib
 torch==2.13.0+cu126
 # torchvision is not imported by this project; add it (matching +cu126) only if needed.
 
+# pip install command for torch that uses gpu
+pip install torch --index-url https://download.pytorch.org/whl/cu126
+
 # Optional: dataset download (download_dataset.py).
 # kagglehub
 
+$ pip install command for kagglehub
+pip install kagglehub
+
 # Development / testing.
 # pytest
+
+# pip install command for pytest
+pip install pytest

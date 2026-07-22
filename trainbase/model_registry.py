@@ -39,10 +39,10 @@ class ModelSpec:
 from .linear_models import ThresholdedLinearRegression
 
 MODEL_REGISTRY: Dict[str, ModelSpec] = {
-    # Soft-margin kernel SVM, the focus of this script. probability=False keeps
-    # fitting fast; ROC-AUC uses decision_function instead.
+    # Soft-margin kernel SVM, the focus of this script. Probabilities stay off
+    # (the default) to keep fitting fast; ROC-AUC uses decision_function instead.
     "svm": ModelSpec(
-        factory=lambda: SVC(probability=False, random_state=RANDOM_STATE),
+        factory=lambda: SVC(random_state=RANDOM_STATE),
         param_grid={
             "clf__C": [0.1, 1.0, 10.0],
             "clf__kernel": ["rbf", "linear"],
