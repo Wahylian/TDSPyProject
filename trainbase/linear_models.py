@@ -1,12 +1,9 @@
 """Linear-regression-as-classifier estimator for the model registry.
 
-``ThresholdedLinearRegression`` wraps plain ordinary-least-squares
-:class:`~sklearn.linear_model.LinearRegression` into a binary classifier: it
-regresses 0/1 class targets and thresholds the continuous output at 0.5. This
-gives the project a literal "linear regression" classifier alongside the
-least-squares :class:`~sklearn.linear_model.RidgeClassifier`, while exposing the
-sklearn classifier surface (``predict`` / ``decision_function`` / ``classes_``)
-that the registry contract and the evaluation suite rely on.
+ThresholdedLinearRegression regresses 0/1 class targets with OLS and thresholds
+the output, giving a literal linear-regression classifier that still exposes the
+sklearn surface (predict/decision_function/classes_) the registry and evaluation
+suite rely on.
 """
 
 from __future__ import annotations
@@ -20,14 +17,9 @@ from .model_registry import RANDOM_STATE
 
 
 class ThresholdedLinearRegression(BaseEstimator, ClassifierMixin):
-    """Binary classifier: least-squares regression thresholded at ``threshold``.
+    """Binary classifier: OLS regression thresholded at threshold.
 
-    Args:
-        fit_intercept: Passed through to the internal ``LinearRegression``.
-        threshold: Decision boundary on the regression output; predictions are
-            the positive class where ``raw >= threshold``.
-        random_state: Held only to satisfy the registry contract (every entry
-            exposes the shared seed). OLS is deterministic, so it is unused.
+    random_state is held only for the registry contract; OLS is deterministic.
     """
 
     def __init__(self, fit_intercept: bool = True, threshold: float = 0.5,

@@ -1,10 +1,8 @@
-"""Operation registry shared by the preprocessing pipeline.
+"""Shared operation registry for the preprocessing pipeline.
 
-Maps each pipeline operation name to the callable that implements it, and records
-which operations act on a *batch* of samples rather than a single image. Kept in
-its own module so :class:`~preprocessing.pipeline.ImagePipeline` and
-:func:`~preprocessing.batching.batch_process` share one definition instead of
-each carrying their own copy.
+Maps operation names to their callables and records which ones act on a batch
+rather than a single image, so ImagePipeline and batch_process agree on one
+definition.
 """
 
 from typing import Callable, Dict
@@ -14,14 +12,11 @@ from .vectorize import vectorize_image
 from .reduce import reduce_dimensions
 from .scale import standardize_features
 
-# Pipeline operations that act on a *batch* of feature vectors rather than a
-# single image. Used by ImagePipeline / batch_process to know where to split the
-# chain. Both learn statistics across samples (a projection for 'reduce',
-# per-feature mean/std for 'scale'). Keep this set small and explicit.
+# Ops that fit statistics across the batch ('reduce' learns a projection,
+# 'scale' learns per-feature mean/std). Marks where the chain splits.
 BATCH_LEVEL_OPS = frozenset({'reduce', 'scale'})
 
-# Map operation names to functions. 'reduce' is intentionally listed here even
-# though it is batch-level so that pipeline validation accepts it.
+# Operation name to callable. Batch-level ops appear here too so validation accepts them.
 OPERATIONS: Dict[str, Callable] = {
     'vectorize': vectorize_image,
     'normalize': normalize_image,

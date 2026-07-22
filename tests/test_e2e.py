@@ -1,19 +1,11 @@
-"""End-to-end test for ``train_model.main`` plus an artifact leak scan.
+"""End-to-end test for train_model.main plus an artifact leak scan.
 
 Drives the full load -> tune -> evaluate -> save path on a tiny synthetic split
-(the ``(image, label)`` feature stream is monkeypatched, so no manifest CSV or
-real image files are needed) and asserts:
-
-* the ``artifacts/<model>/<run_id>/`` bundle exists (model + pipeline + metadata),
-* ``metadata.json`` carries the uniform top-level schema and headline metrics,
-* the saved joblib artifacts reload into working objects,
-* and — a portable security/privacy check scoped to *this* generated run — that
-  the emitted files leak no machine-specific absolute paths or credential-like
-  tokens, so artifact saving is deterministically clean on any host.
-
-A minimal custom pipeline (grayscale -> resize 8x8 -> normalize -> vectorize ->
-vec-pca(8) -> scale) keeps the run instant while still exercising the fitted
-batch-level reducer/scaler on the streamed val/test transform path.
+(the feature stream is monkeypatched, so no manifest or real images are needed)
+and asserts the artifact bundle exists, metadata carries the uniform schema, the
+joblib artifacts reload, and the emitted files leak no machine-specific paths or
+credential-like tokens. A minimal custom pipeline keeps the run instant while
+still exercising the fitted batch-level reducer/scaler on val/test.
 """
 
 from __future__ import annotations
@@ -28,7 +20,7 @@ import pytest
 import train_model
 from trainbase.artifacts import HEADLINE_METRICS
 
-# A tiny, self-contained feature pipeline: 64 pixels -> PCA(8) -> standardized.
+# A tiny self-contained feature pipeline: 64 pixels -> PCA(8) -> standardized.
 SPEC = json.dumps([
     ["grayscale", {}],
     ["resize", {"target_size": [8, 8], "preserve_aspect": False}],
@@ -47,11 +39,10 @@ EXPECTED_METADATA_KEYS = {
 
 
 def _fake_feature_stream(n: int = 50):
-    """Build a ``get_feature_stream`` stand-in yielding a separable 2-class split.
+    """A get_feature_stream stand-in yielding a separable 2-class split.
 
-    Class 0 is dark (~40) and class 1 is bright (~200), so any linear model
-    separates them. A fresh generator is produced per call, matching the real
-    stream's per-split invocation.
+    Class 0 is dark (~40), class 1 bright (~200), so any linear model separates
+    them. A fresh generator is produced per call, matching the real stream.
     """
     def stream(split, csv_path=None, random_seed=None):
         rng = np.random.default_rng(0)
@@ -67,7 +58,7 @@ def _fake_feature_stream(n: int = 50):
 
 @pytest.fixture
 def synthetic_run_artifact_dir(tmp_path, monkeypatch):
-    """Run ``train_model.main`` on the synthetic stream; return the run dir."""
+    """Run train_model.main on the synthetic stream; return the run dir."""
     monkeypatch.setattr(
         "trainbase.features.get_feature_stream", _fake_feature_stream()
     )
@@ -100,7 +91,7 @@ class TestEndToEndBundle:
         assert (run / "metadata.json").is_file()
 
     def test_metadata_schema_and_content(self, synthetic_run_artifact_dir):
-        """``metadata.json`` has the uniform schema and coherent content."""
+        """metadata.json has the uniform schema and coherent content."""
         metadata = json.loads(
             (synthetic_run_artifact_dir / "metadata.json").read_text(encoding="utf-8")
         )

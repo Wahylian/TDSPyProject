@@ -1,14 +1,8 @@
-"""Algorithm-appropriate diagnostics for a fitted training run.
+"""Model-specific diagnostics for a fitted training run.
 
-Beyond the headline metrics in :mod:`trainbase.evaluation`, a run can capture
-cheap, model-specific diagnostics that make performance graphing and model
-comparison possible: tree-based feature importances, the Random Forest
-out-of-bag score, the per-configuration validation scores from the
-hyperparameter search, and (opt-in) a learning curve over sample sizes.
-
-The current model registry holds only classical sklearn estimators, so there is
-no per-epoch loss/metric history to record. An iterative model (e.g. a neural
-network) would add that history here as a separate branch.
+Beyond the headline metrics, captures cheap extras for graphing and comparison:
+tree feature importances, the Random Forest OOB score, per-configuration
+validation scores from the hyperparameter search, and an opt-in learning curve.
 """
 
 from __future__ import annotations
@@ -25,8 +19,7 @@ from .model_registry import RANDOM_STATE
 
 logger = logging.getLogger(__name__)
 
-# Bounded, fixed grid so the (opt-in) learning curve stays affordable even for
-# an expensive estimator like a kernel SVM.
+# Fixed grid keeping the opt-in learning curve affordable even for a kernel SVM.
 _LEARNING_CURVE_SIZES = [0.2, 0.4, 0.6, 0.8, 1.0]
 _LEARNING_CURVE_CV = 3
 
@@ -39,12 +32,7 @@ def _jsonable(value: object) -> object:
 
 
 def _hyperparameter_scores(search: GridSearchCV) -> List[Dict[str, object]]:
-    """Per-configuration validation scores from the fitted GridSearchCV.
-
-    Serves as the "validation curve across the hyperparameter grid": each grid
-    point with its mean/std validation score. Free — GridSearchCV already
-    computed it in ``cv_results_``.
-    """
+    """Per-configuration mean/std validation scores from GridSearchCV.cv_results_."""
     results = search.cv_results_
     scores: List[Dict[str, object]] = []
     for params, mean, std in zip(
@@ -66,11 +54,10 @@ def _learning_curve(
     y_train: np.ndarray,
     scoring: str,
 ) -> Optional[Dict[str, object]]:
-    """Train/val scores over increasing training-set sizes (opt-in, best-effort).
+    """Train/val scores over growing training-set sizes, best-effort.
 
-    Refits a clone of the tuned model on growing subsets. Wrapped so any failure
-    (too few samples per class, an estimator that rejects a subset, etc.) is
-    logged and yields ``None`` rather than crashing the run.
+    Refits a clone of the tuned model on growing subsets; any failure is logged
+    and returns None rather than crashing the run.
     """
     try:
         sizes, train_scores, val_scores = learning_curve(
@@ -80,8 +67,8 @@ def _learning_curve(
             train_sizes=_LEARNING_CURVE_SIZES,
             cv=_LEARNING_CURVE_CV,
             scoring=scoring,
-            shuffle=True,               # draw each size's subset representatively,
-            random_state=RANDOM_STATE,  # deterministically (not the sorted prefix)
+            shuffle=True,               # representative subsets, not the sorted prefix
+            random_state=RANDOM_STATE,  # made deterministic by the seed
             n_jobs=-1,
         )
     except Exception as exc:  # best-effort diagnostic; never fail the run
@@ -104,21 +91,9 @@ def collect_diagnostics(
 ) -> Dict[str, object]:
     """Gather JSON-serializable diagnostics for the tuned model.
 
-    Always includes the hyperparameter-grid validation scores, plus feature
-    importances and the OOB score when the estimator exposes them (tree-based
-    models). When ``include_curves`` is set, also computes a bounded learning
-    curve over sample sizes (the one diagnostic that costs extra model fits).
-
-    Args:
-        search: The fitted GridSearchCV from tuning.
-        best_model: Its ``best_estimator_`` (a one-step ``clf`` Pipeline).
-        X_train, y_train: Training features/labels (for the learning curve).
-        include_curves: Compute the sample-size learning curve if True.
-        scoring: Metric name used for the learning curve.
-
-    Returns:
-        A dict with uniform keys (values ``None`` when a diagnostic does not
-        apply to this estimator or was not requested).
+    Always includes the hyperparameter-grid scores, plus feature importances and
+    OOB score when the estimator exposes them. include_curves adds the learning
+    curve (the only diagnostic costing extra fits). Absent diagnostics are None.
     """
     clf = best_model.named_steps["clf"]
 

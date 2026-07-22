@@ -1,25 +1,10 @@
-"""
-Helper For 'train_model.py'
+"""Registry of trainable classifiers for train_model.py.
 
-Contains the Registry for ML models that the project can train on.
-
-How to add a new classifier to the model Registry (Example):
-    To add a Gradiant Boosting model:
-    1. Import it at the top of the file
-    2. Add an entry of the following structure to the MODEL_REGISTRY:
-        "gb" :  ModelSpec(
-               factory=lambda: GradientBoostingClassifier(random_state=RANDOM_STATE),
-               param_grid={"clf__learning_rate": [0.05, 0.1], "clf__n_estimators": [100, 200]},
-            )
-    3. Run with ``--model gb``.
-
-    Grid keys are prefixed with ``clf__`` because the estimator is the ``"clf"`` step of the sklearn
-    ``Pipeline`` (see ``build_estimator``).
-
-    The registry also carries optional deep models — ``cnn``/``cnn_deep`` and
-    ``vit``/``vit_deep`` — which are registered only when PyTorch is installed
-    (see ``trainbase/torch_models.py``). Pair them with a raw-pixel pipeline:
-    ``--model cnn --pipeline pixels`` (or ``--model cnn_deep --pipeline pixels_hq``).
+To add a model: import the estimator, add a ModelSpec entry keyed by a CLI name,
+and run with --model <name>. Grid keys are prefixed 'clf__' because the estimator
+is the "clf" step of the sklearn Pipeline (see build_estimator). Deep models
+(cnn/vit) register only when PyTorch is installed; pair them with a raw-pixel
+pipeline, e.g. --model cnn --pipeline pixels.
 """
 
 
@@ -27,7 +12,6 @@ How to add a new classifier to the model Registry (Example):
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Tuple
 
-# -- sk-learn ----------------------------------------------------------------
 from sklearn.base import BaseEstimator
 from sklearn.dummy import DummyClassifier
 from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
@@ -35,46 +19,28 @@ from sklearn.linear_model import LogisticRegression, RidgeClassifier
 from sklearn.neural_network import MLPClassifier
 from sklearn.svm import SVC, LinearSVC
 
-# -- Constants ---------------------------------------------------------------
-
-# A single seed threaded through every random operation (subsampling, PCA, the
-# estimators) so the whole run is reproducible.
+# One seed threaded through every random operation for reproducibility.
 RANDOM_STATE = 42
 
-# =============================================================================
-# Model registry — the single place to add or swap classifiers.
-# =============================================================================
+
 @dataclass
 class ModelSpec:
-    """One entry in :data:`MODEL_REGISTRY`.
+    """One MODEL_REGISTRY entry: an estimator factory plus its tuning grid.
 
-    Attributes:
-        factory: A zero-argument callable returning a *fresh*, unfitted
-            estimator. It is a factory (not a pre-built instance) so each run
-            gets its own clean estimator and we never accidentally reuse fitted
-            state across runs.
-        param_grid: The hyperparameter grid handed to ``GridSearchCV``. Keys are
-            prefixed with ``clf__`` because the estimator is the ``"clf"`` step
-            of the sklearn ``Pipeline`` built in :func:`build_estimator`. An
-            empty grid means "no tuning" (the model is fit with its defaults).
+    factory returns a fresh unfitted estimator each call, so no fitted state
+    leaks across runs. param_grid feeds GridSearchCV with 'clf__'-prefixed keys;
+    an empty grid means no tuning.
     """
 
     factory: Callable[[], BaseEstimator]
     param_grid: Dict[str, list] = field(default_factory=dict)
 
 
-# To add a new classifier: import it above, then add one entry here. Nothing
-# else in the script needs to change — selection is purely by the ``--model``
-# flag, and the PCA->scale feature front-end / tuning / evaluation are shared.
 from .linear_models import ThresholdedLinearRegression
 
 MODEL_REGISTRY: Dict[str, ModelSpec] = {
-    # Soft-margin kernel SVM — the focus of this script.
-    #   * C       : soft-margin strength (low C = wider margin, more tolerant).
-    #   * kernel  : 'rbf' (non-linear) vs 'linear' (gamma is ignored for linear,
-    #               but leaving it in the grid is harmless).
-    #   * gamma   : RBF kernel width; 'scale' and 'auto' are data-derived defaults.
-    # probability=False keeps fitting fast; we use decision_function for ROC-AUC.
+    # Soft-margin kernel SVM, the focus of this script. probability=False keeps
+    # fitting fast; ROC-AUC uses decision_function instead.
     "svm": ModelSpec(
         factory=lambda: SVC(probability=False, random_state=RANDOM_STATE),
         param_grid={
@@ -83,10 +49,7 @@ MODEL_REGISTRY: Dict[str, ModelSpec] = {
             "clf__gamma": ["scale", "auto"],
         },
     ),
-    # Random Forest — a strong, scale-insensitive baseline. Included to
-    # demonstrate how trivially the classifier swaps out (`--model rf`).
-    # oob_score=True exposes an out-of-bag error estimate (clf.oob_score_) that
-    # the diagnostics collector saves; it relies on the default bootstrap=True.
+    # Scale-insensitive bagging baseline. oob_score exposes clf.oob_score_ for diagnostics.
     "rf": ModelSpec(
         factory=lambda: RandomForestClassifier(
             random_state=RANDOM_STATE, n_jobs=-1, oob_score=True
@@ -96,41 +59,34 @@ MODEL_REGISTRY: Dict[str, ModelSpec] = {
             "clf__max_depth": [None, 20],
         },
     ),
-    # Plain logistic regression — a fast linear reference point.
+    # Fast linear reference point.
     "logreg": ModelSpec(
         factory=lambda: LogisticRegression(
             max_iter=1000, random_state=RANDOM_STATE
         ),
         param_grid={"clf__C": [0.1, 1.0, 10.0]},
     ),
-    # Hard-margin SVM — a huge C drives the soft margin toward the hard-margin
-    # limit (no slack). LinearSVC is the fast, purpose-built linear realization;
-    # it exposes decision_function for ROC/PR-AUC.
+    # Hard-margin SVM: a huge C removes the slack. LinearSVC is the fast linear form.
     "hard_svm": ModelSpec(
         factory=lambda: LinearSVC(C=1e6, random_state=RANDOM_STATE),
         param_grid={"clf__C": [1e4, 1e6]},
     ),
-    # Same hard margin via the kernel SVC with a linear kernel — mirrors the
-    # existing 'svm' entry's style for a like-for-like comparison.
+    # Same hard margin via the kernel SVC with a linear kernel, for a like-for-like compare.
     "hard_svm_kernel": ModelSpec(
         factory=lambda: SVC(kernel="linear", C=1e6, random_state=RANDOM_STATE),
         param_grid={"clf__C": [1e4, 1e6]},
     ),
-    # Ridge (least-squares) classifier — "linear regression as a classifier":
-    # it regresses the class targets and thresholds. Exposes decision_function.
+    # Least-squares classifier: regresses the class targets and thresholds.
     "ridge": ModelSpec(
         factory=lambda: RidgeClassifier(random_state=RANDOM_STATE),
         param_grid={"clf__alpha": [0.1, 1.0, 10.0]},
     ),
-    # Plain linear regression used as a classifier: regress 0/1 targets and
-    # threshold at 0.5. The most literal "linear regression" baseline.
+    # The most literal linear-regression baseline: regress 0/1 targets, threshold at 0.5.
     "linreg": ModelSpec(
         factory=lambda: ThresholdedLinearRegression(random_state=RANDOM_STATE),
         param_grid={"clf__fit_intercept": [True, False]},
     ),
-    # Histogram-based gradient boosting — the boosting counterpart to the
-    # bagging Random Forest, and a strong non-linear baseline on the PCA
-    # features. Fast (binned splits) and scale-insensitive like the forest.
+    # Histogram gradient boosting: fast, scale-insensitive non-linear baseline on the PCA features.
     "hgb": ModelSpec(
         factory=lambda: HistGradientBoostingClassifier(random_state=RANDOM_STATE),
         param_grid={
@@ -138,10 +94,8 @@ MODEL_REGISTRY: Dict[str, ModelSpec] = {
             "clf__max_iter": [100, 200],
         },
     ),
-    # Multi-layer perceptron — the project's iterative sklearn model. It fits by
-    # gradient descent and exposes ``loss_curve_`` (per-epoch training loss), the
-    # hook for a per-epoch training-history diagnostic. max_iter is raised so the
-    # small feature splits converge without a ConvergenceWarning.
+    # Iterative MLP exposing loss_curve_ for the per-epoch training-history diagnostic.
+    # max_iter is raised so small splits converge without a ConvergenceWarning.
     "mlp": ModelSpec(
         factory=lambda: MLPClassifier(max_iter=500, random_state=RANDOM_STATE),
         param_grid={
@@ -152,11 +106,8 @@ MODEL_REGISTRY: Dict[str, ModelSpec] = {
 }
 
 
-# --- Optional deep models (CNN / ViT) -------------------------------------
-# Registered only when torch is importable, so the project imports and runs
-# unchanged without the optional PyTorch dependency. Membership is dynamic by
-# design (see the package docstring): with torch installed, `--model cnn/vit`
-# become available automatically.
+# Deep models register only when torch is importable, so the project runs
+# without the optional dependency; --model cnn/vit then appear automatically.
 try:
     from .torch_models import build_torch_registry
 

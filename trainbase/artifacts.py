@@ -1,15 +1,9 @@
 """Persist a training run: feature pipeline, classifier, and metadata JSON.
 
-Each run writes an isolated bundle to ``<base_dir>/<model_name>/<run_id>/`` so
-reruns of the same model never overwrite one another:
-
-    <base_dir>/<model_name>/<run_id>/
-        model.joblib             # the fitted best estimator
-        feature_pipeline.joblib  # the fitted ImagePipeline (PCA basis + scaling)
-        metadata.json            # the uniform run record (see build_metadata)
-
-The two joblib artifacts together capture the full inference path from a raw
-image: ``model.predict([feature_pipeline.process(image)])``.
+Each run writes model.joblib, feature_pipeline.joblib, and metadata.json into an
+isolated <base_dir>/<model_name>/<run_id>/ so reruns never overwrite. The two
+joblib artifacts capture the full inference path:
+model.predict([feature_pipeline.process(image)]).
 """
 
 from __future__ import annotations
@@ -26,8 +20,7 @@ from preprocessing import ImagePipeline
 
 logger = logging.getLogger(__name__)
 
-# The standardized headline metrics captured uniformly for every model, so runs
-# stay directly comparable regardless of estimator.
+# Headline metrics captured uniformly so runs stay comparable across estimators.
 HEADLINE_METRICS = ["accuracy", "precision", "recall", "pr_auc", "roc_auc"]
 
 
@@ -52,31 +45,12 @@ def build_metadata(
     baseline_metrics: Dict[str, object],
     diagnostics: Dict[str, object],
 ) -> Dict[str, object]:
-    """Assemble the uniform ``metadata.json`` record for a run.
+    """Assemble the uniform metadata.json record for a run.
 
-    The schema's top-level keys are identical for every model. ``evaluation_metrics``
-    and ``baseline_metrics`` hold the five standardized headline scores; the
-    confusion matrix and per-class report are folded into ``diagnostics`` next to
-    the estimator-specific diagnostics (feature importances, OOB, curves), whose
-    keys are always present (``None`` when a diagnostic does not apply).
-
-    Args:
-        model_name: Registry name of the trained classifier.
-        run_id: Per-run identifier (also the run subdirectory name).
-        timestamp: ISO-8601 run start time.
-        pipeline_used: Feature-pipeline registry name, or ``"custom"``.
-        pipeline_spec: The verbatim custom JSON spec, or ``None``.
-        pipeline_steps: The fitted ImagePipeline's operation list (reproducibility).
-        scoring: Metric optimized during tuning.
-        sample_sizes: ``{"train": n, "val": n, "test": n}`` actually used.
-        hyperparameters: The selected best hyperparameters.
-        best_val_score: Validation score of the selected configuration.
-        test_metrics: Full :func:`trainbase.evaluation.evaluate` dict for the model.
-        baseline_metrics: Full evaluate dict for the naive baseline.
-        diagnostics: :func:`trainbase.diagnostics.collect_diagnostics` output.
-
-    Returns:
-        A JSON-serializable dict ready to write as ``metadata.json``.
+    Top-level keys are identical for every model. evaluation_metrics and
+    baseline_metrics hold the five headline scores; the confusion matrix and
+    per-class report are folded into diagnostics alongside the estimator-specific
+    ones (feature importances, OOB, curves), all always present (None if absent).
     """
     run_diagnostics: Dict[str, object] = {
         "confusion_matrix": test_metrics.get("confusion_matrix"),
@@ -109,25 +83,9 @@ def save_artifacts(
     model_name: str,
     run_id: str,
 ) -> Path:
-    """Serialize the fitted pipeline, the model, and the metadata into a run dir.
+    """Write model.joblib, feature_pipeline.joblib, and metadata.json to the run dir.
 
-    Writes ``model.joblib``, ``feature_pipeline.joblib`` and ``metadata.json``
-    into ``base_dir/model_name/run_id/`` (created if missing). The fitted
-    ``feature_pipeline`` (the project ImagePipeline holding the per-image
-    transforms *and* the trained PCA basis *and* scaling statistics) turns an
-    image into a model-ready vector via ``feature_pipeline.process(image)``, and
-    the fitted sklearn ``model`` scores it.
-
-    Args:
-        model: The fitted best estimator (a one-step ``clf`` ``Pipeline``).
-        feature_pipeline: The fitted :class:`ImagePipeline`.
-        metadata: The uniform run record from :func:`build_metadata`.
-        base_dir: Root artifacts directory (created if missing).
-        model_name: Names the per-model subdirectory.
-        run_id: Names the per-run subdirectory.
-
-    Returns:
-        The run directory the artifacts were written to.
+    Creates base_dir/model_name/run_id/ if missing and returns it.
     """
     run_dir = base_dir / model_name / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
