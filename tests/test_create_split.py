@@ -1,14 +1,9 @@
-"""
-Tests for the dataset splitter in ``create_split.py``.
+"""Tests for the dataset splitter in create_split.py.
 
-``create_split`` scans a dataset directory holding a ``real`` and a ``fake``
-subfolder of ``.jpg``/``.png`` images and writes a single manifest CSV with the
-columns ``photo_name``, ``photo_path``, ``label`` and ``split``. The rows are
-shuffled with a seeded RNG and partitioned 70/15/15 into train/val/test.
-
-These tests build a small, real dataset tree under ``tmp_path`` (empty image
-files are enough — the splitter only scans filenames) and write the manifest to
-``tmp_path`` too, so nothing touches the repository's real dataset.
+create_split scans real/ and fake/ image folders and writes a manifest CSV
+(photo_name, photo_path, label, split) shuffled and partitioned 70/15/15. These
+build a small real dataset tree under tmp_path (empty files suffice, the splitter
+only scans filenames) so nothing touches the repository's real dataset.
 """
 
 from __future__ import annotations
@@ -19,18 +14,8 @@ import pytest
 import create_split as cs
 
 
-# ===========================================================================
-# Test helpers / fixtures
-# ===========================================================================
-
 def _make_dataset_tree(root, n_real: int, n_fake: int):
-    """Create a real/ and fake/ tree of empty ``.jpg`` files under *root*.
-
-    The splitter only globs filenames, so the files need no real image bytes.
-
-    Returns:
-        The dataset directory (the parent of the two class subfolders).
-    """
+    """Create real/ and fake/ trees of empty .jpg files under root; return root."""
     real_dir = root / "real"
     fake_dir = root / "fake"
     real_dir.mkdir(parents=True)
@@ -46,9 +31,8 @@ def _make_dataset_tree(root, n_real: int, n_fake: int):
 def run_split(tmp_path):
     """Build a 20-image dataset and return a callable that runs the splitter.
 
-    The callable runs ``create_split`` for a given seed, writing the manifest to
-    a tmp path, and returns the resulting DataFrame. Exposes ``n``, ``out_csv``
-    and ``data_dir`` for assertions.
+    The callable runs create_split for a given seed and returns the DataFrame.
+    Exposes n, out_csv, and data_dir for assertions.
     """
     n_real, n_fake = 10, 10
     data_dir = _make_dataset_tree(tmp_path / "data", n_real, n_fake)
@@ -63,15 +47,11 @@ def run_split(tmp_path):
     return run
 
 
-# ===========================================================================
-# 1. Error handling
-# ===========================================================================
-
 class TestCreateSplitErrors:
     """Failure modes when the dataset layout is missing."""
 
     def test_missing_data_dir_raises_filenotfound(self, tmp_path):
-        """A non-existent dataset directory raises ``FileNotFoundError``."""
+        """A non-existent dataset directory raises FileNotFoundError."""
         with pytest.raises(FileNotFoundError):
             cs.create_split(
                 data_dir=tmp_path / "does_not_exist",
@@ -79,13 +59,7 @@ class TestCreateSplitErrors:
             )
 
     def test_missing_class_subfolder_raises_filenotfound(self, tmp_path):
-        """A dataset dir missing the fake/ subfolder raises ``FileNotFoundError``.
-
-        Edge case: the directory exists but its expected class layout is
-        incomplete, so the splitter must fail loudly rather than emit a manifest
-        covering only one class.
-        """
-        # Arrange: only the real/ subfolder is present.
+        """A dataset dir missing the fake/ subfolder raises FileNotFoundError."""
         (tmp_path / "data" / "real").mkdir(parents=True)
         with pytest.raises(FileNotFoundError):
             cs.create_split(
@@ -94,12 +68,8 @@ class TestCreateSplitErrors:
             )
 
 
-# ===========================================================================
-# 2. Manifest content & labelling
-# ===========================================================================
-
 class TestManifestContent:
-    """Columns, labelling, path format and image coverage of the manifest."""
+    """Columns, labelling, path format, and image coverage of the manifest."""
 
     def test_output_has_exactly_the_expected_columns(self, run_split):
         """The manifest carries exactly photo_name, photo_path, label, split."""
@@ -107,16 +77,12 @@ class TestManifestContent:
         assert list(df.columns) == ["photo_name", "photo_path", "label", "split"]
 
     def test_all_images_are_included(self, run_split):
-        """Every ``.jpg`` under both class folders appears exactly once."""
+        """Every .jpg under both class folders appears exactly once."""
         df = run_split()
         assert len(df) == run_split.n
 
     def test_png_and_jpg_images_are_both_included(self, tmp_path):
-        """The scan picks up ``.png`` images as well as ``.jpg`` ones.
-
-        The dataset mixes both formats, so a manifest that only globbed ``.jpg``
-        would silently drop every PNG.
-        """
+        """The scan picks up .png images as well as .jpg ones."""
         real_dir = tmp_path / "data" / "real"
         fake_dir = tmp_path / "data" / "fake"
         real_dir.mkdir(parents=True)
@@ -131,40 +97,29 @@ class TestManifestContent:
         assert set(df["photo_name"]) == {"real_0.jpg", "real_1.png", "fake_0.png"}
 
     def test_labels_match_class_folders(self, run_split):
-        """Real images get label 0 and Deepfake images get label 1.
-
-        The label is derived purely from the source subfolder, so each
-        ``real_*`` file must be 0 and each ``fake_*`` file must be 1.
-        """
+        """Real images get label 0 and fake images get label 1, from the folder."""
         df = run_split().set_index("photo_name")
-        # Real folder -> 0
         assert (df.loc[[f"real_{i}.jpg" for i in range(10)], "label"] == 0).all()
-        # Deepfake folder -> 1
         assert (df.loc[[f"fake_{i}.jpg" for i in range(10)], "label"] == 1).all()
 
     def test_photo_path_uses_forward_slashes_and_ends_with_name(self, run_split):
-        """``photo_path`` is forward-slashed and ends with its ``photo_name``."""
+        """photo_path is forward-slashed and ends with its photo_name."""
         df = run_split()
         for _, row in df.iterrows():
             assert "\\" not in row["photo_path"]
             assert row["photo_path"].endswith(row["photo_name"])
 
     def test_manifest_is_written_to_disk(self, run_split):
-        """The manifest is persisted to ``output_csv`` and reads back identically."""
+        """The manifest is persisted to output_csv and reads back identically."""
         df = run_split()
         assert run_split.out_csv.is_file()
-        # The on-disk CSV round-trips to the same rows the function returned.
         from_disk = pd.read_csv(run_split.out_csv)
         assert len(from_disk) == len(df)
         assert list(from_disk.columns) == list(df.columns)
 
 
-# ===========================================================================
-# 3. Split proportions & determinism
-# ===========================================================================
-
 class TestSplitLogic:
-    """The 70/15/15 partition sizes, coverage and reproducibility."""
+    """The 70/15/15 partition sizes, coverage, and reproducibility."""
 
     def test_split_proportions_are_70_15_15(self, run_split):
         """Split sizes follow int(0.70*n) / int(0.15*n) / remainder."""

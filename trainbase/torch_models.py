@@ -1,19 +1,13 @@
 """Torch-backed image classifiers (CNN, ViT) for the model registry.
 
-These wrap small PyTorch networks in the sklearn estimator interface so they
-drop into :data:`trainbase.model_registry.MODEL_REGISTRY` like any other
-classifier — selected by ``--model``, tuned by ``GridSearchCV``, scored by the
-shared evaluation suite. Torch is an OPTIONAL dependency: this module is only
-imported (and its models only registered) when ``import torch`` succeeds.
+Small PyTorch networks wrapped in the sklearn estimator interface so they drop
+into MODEL_REGISTRY like any other classifier. Torch is optional: this module is
+imported only when import torch succeeds.
 
-Raw-pixel faithfulness
-----------------------
-The feature front-end hands the estimator a flat feature matrix ``X``. Paired
-with a no-PCA pixel pipeline (``pixels`` / ``pixels_hq``), each row is the
-flattened grayscale image. :meth:`_TorchImageClassifier.fit` reshapes it back to
-``(N, C, H, W)`` before the first conv / patch-embedding layer, so the network
-operates on genuine spatial pixels. When ``image_shape`` is not given it is
-inferred as square grayscale from the vector width.
+The feature front-end hands over a flat matrix; paired with a no-PCA pixel
+pipeline each row is a flattened grayscale image, which fit reshapes back to
+(N, C, H, W) so the network sees real pixels. image_shape defaults to square
+grayscale inferred from the vector width.
 """
 
 from __future__ import annotations
@@ -34,14 +28,10 @@ from .model_registry import RANDOM_STATE, ModelSpec
 def _resolve_image_shape(
     n_features: int, image_shape: Optional[Tuple[int, int, int]]
 ) -> Tuple[int, int, int]:
-    """Resolve/validate the ``(C, H, W)`` a flat vector of width ``n_features`` maps to.
+    """Resolve the (C, H, W) a flat vector of width n_features maps to.
 
-    If ``image_shape`` is given, validate ``C*H*W == n_features``. Otherwise infer
-    a square single-channel image (``C=1, H=W=sqrt(n_features)``).
-
-    Raises:
-        ValueError: if the explicit shape does not match, or a square grayscale
-            image cannot be inferred.
+    A given image_shape is validated against n_features; otherwise a square
+    single-channel image is inferred. Raises if neither holds.
     """
     if image_shape is not None:
         c, h, w = image_shape
@@ -63,10 +53,8 @@ def _resolve_image_shape(
 class _TorchImageClassifier(BaseEstimator, ClassifierMixin):
     """Base sklearn wrapper: reshape flat pixels, train a torch module, predict.
 
-    Subclasses implement :meth:`_build_module`. All constructor arguments are
-    plain attributes so sklearn ``clone`` / ``get_params`` / ``GridSearchCV``
-    work. Fitted state (``classes_``, ``module_``, ``image_shape_``,
-    ``n_features_in_``) is set only in :meth:`fit`.
+    Subclasses implement _build_module. Constructor args are plain attributes so
+    sklearn clone/get_params/GridSearchCV work; fitted state is set only in fit.
     """
 
     def __init__(self, epochs: int = 10, lr: float = 1e-3, batch_size: int = 32,
@@ -81,17 +69,11 @@ class _TorchImageClassifier(BaseEstimator, ClassifierMixin):
         self.device = device
         self.random_state = random_state
 
-    # --- subclass hook ----------------------------------------------------
     def _build_module(self, in_shape: Tuple[int, int, int], n_classes: int) -> nn.Module:
         raise NotImplementedError
 
     def _device(self) -> "torch.device":
-        """Resolve the training device.
-
-        Honors an explicit ``device``; otherwise auto-selects a CUDA GPU when
-        one is available and falls back to CPU with a warning (training on CPU
-        may be slow).
-        """
+        """Resolve the training device: explicit device, else CUDA, else CPU with a warning."""
         if self.device is not None:
             return torch.device(self.device)
         if torch.cuda.is_available():
@@ -102,7 +84,6 @@ class _TorchImageClassifier(BaseEstimator, ClassifierMixin):
         )
         return torch.device("cpu")
 
-    # --- sklearn API ------------------------------------------------------
     def fit(self, X, y):
         X = np.asarray(X, dtype=np.float32)
         y = np.asarray(y)
@@ -256,12 +237,10 @@ class ViTClassifier(_TorchImageClassifier):
 
 
 def build_torch_registry() -> Dict[str, ModelSpec]:
-    """Return the torch model entries for :data:`MODEL_REGISTRY`.
+    """Return the torch MODEL_REGISTRY entries.
 
-    Two presets per architecture: a light default (CPU-friendly, ~10 epochs,
-    64x64 via the ``pixels`` pipeline) and a heavier variant (~20-25 epochs,
-    128x128 via ``pixels_hq``). Each ships a tiny ``clf__lr`` grid so tuning
-    stays cheap while honoring the non-empty-grid registry contract.
+    Two presets per architecture: a light default and a heavier deep variant,
+    each with a tiny clf__lr grid so tuning stays cheap.
     """
     return {
         "cnn": ModelSpec(

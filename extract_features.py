@@ -1,26 +1,9 @@
-"""
-Stream ``(image, label)`` pairs for a dataset split from the manifest CSV.
+"""Stream (image, label) pairs for a dataset split from the manifest CSV.
 
-Reads the manifest produced by ``create_split.py`` (columns ``photo_name``,
-``photo_path``, ``label``, ``split``), filters it to the requested split, loads
-each image from local storage, decodes it to a BGR NumPy array (OpenCV
-convention, matching the ``preprocessing`` package), and yields
-``(image, label)`` pairs one at a time. Only the lightweight ``(path, label)``
-rows are held in memory; the heavy decoded images are streamed one by one, so a
-large split never has to be loaded all at once.
-
-Image paths recorded relative to the project root are resolved against this
-script's directory, so streaming works regardless of the caller's working
-directory.
-
-Typical usage::
-
-    for image, label in get_feature_stream("train"):
-        features = pipeline.process(image)
-        # train downstream on (features, label)
-
-Requirements:
-    pip install numpy opencv-python
+Filters the create_split.py manifest to the requested split and yields decoded
+BGR images one at a time. Only the (path, label) rows are held in memory, so a
+large split is never fully loaded. Relative paths resolve against this script's
+directory, so streaming is independent of the caller's working directory.
 """
 
 from __future__ import annotations
@@ -35,18 +18,16 @@ from typing import Generator, List, Optional, Tuple
 import cv2
 import numpy as np
 
-# The three partition names the manifest's "split" column may contain.
+# Valid values of the manifest's "split" column.
 VALID_SPLITS = frozenset({"train", "val", "test"})
 
-# Directory of this script. Image paths recorded relative to the project root
-# (as written by create_split.py) are resolved against it, so loading does not
-# depend on the caller's current working directory.
+# Relative image paths resolve against this dir, not the caller's cwd.
 PROJECT_DIR = Path(__file__).resolve().parent
 
 # Default manifest location, matching create_split.py's default output.
 DEFAULT_CSV = PROJECT_DIR / "datasets" / "dataset_split.csv"
 
-# Manifest column names. These must match the columns written by create_split.py.
+# Manifest column names, matching create_split.py.
 PATH_COLUMN = "photo_path"
 LABEL_COLUMN = "label"
 SPLIT_COLUMN = "split"
@@ -64,22 +45,7 @@ def _validate_split(split: str) -> None:
 
 
 def _load_entries(split: str, csv_path: str) -> List[Entry]:
-    """Load the ``(photo_path, label)`` entries for one split from the manifest.
-
-    Reads the manifest CSV, keeps only the rows whose ``split`` column matches
-    the requested split, and pairs each image path with its integer label.
-
-    Args:
-        split: Partition to load. Must be ``"train"``, ``"val"`` or ``"test"``.
-        csv_path: Path to the manifest CSV produced by ``create_split.py``.
-
-    Returns:
-        A list of ``(photo_path, label)`` tuples for the requested split.
-
-    Raises:
-        ValueError: If ``split`` is unknown or the CSV lacks a required column.
-        FileNotFoundError: If the manifest CSV does not exist.
-    """
+    """Load the (photo_path, label) entries for one split from the manifest."""
     _validate_split(split)
 
     csv_path = str(csv_path)
@@ -93,8 +59,7 @@ def _load_entries(split: str, csv_path: str) -> List[Entry]:
         reader = csv.DictReader(f)
         fieldnames = reader.fieldnames or []
 
-        # Fail loudly if the manifest is missing any column we depend on, rather
-        # than silently yielding nothing.
+        # Fail loudly on a missing column rather than silently yielding nothing.
         for column in (PATH_COLUMN, LABEL_COLUMN, SPLIT_COLUMN):
             if column not in fieldnames:
                 raise ValueError(
@@ -103,11 +68,10 @@ def _load_entries(split: str, csv_path: str) -> List[Entry]:
                 )
 
         for row in reader:
-            # Keep only rows belonging to the requested split.
             if row[SPLIT_COLUMN] != split:
                 continue
             path = row[PATH_COLUMN].strip()
-            # Skip rows with no path; there is no image to stream for them.
+            # No path means no image to stream.
             if not path:
                 continue
             label = int(row[LABEL_COLUMN])
@@ -117,18 +81,10 @@ def _load_entries(split: str, csv_path: str) -> List[Entry]:
 
 
 def _load_image(path: str) -> Optional[np.ndarray]:
-    """Read a single image from local storage and return it as a BGR NumPy array.
+    """Decode one image to a uint8 BGR array, or None (with a warning) if unreadable.
 
-    Relative paths are resolved against the project directory. An image that is
-    missing or cannot be decoded yields ``None`` (after a warning) so one bad
-    file does not abort the stream.
-
-    Args:
-        path: Image path, absolute or relative to the project root.
-
-    Returns:
-        The decoded image as a ``uint8`` BGR array of shape
-        ``(height, width, 3)``, or ``None`` if it could not be read.
+    Relative paths resolve against the project directory; a bad file is skipped
+    rather than aborting the stream.
     """
     resolved = path if os.path.isabs(path) else os.path.join(PROJECT_DIR, path)
     image = cv2.imread(resolved, cv2.IMREAD_COLOR)
@@ -143,39 +99,17 @@ def get_feature_stream(
     csv_path: str = DEFAULT_CSV,
     random_seed: Optional[int] = 42,
 ) -> Generator[Tuple[np.ndarray, int], None, None]:
-    """Yield ``(image, label)`` pairs for every readable image in a split.
+    """Yield (image, label) pairs for every readable image in a split.
 
-    The ``(path, label)`` rows for the split are loaded from the manifest and
-    shuffled up front (so the stream is not biased by file/class order), then
-    images are read and decoded one at a time in that shuffled order. Only the
-    cheap path/label strings are held in memory; decoded images stay streamed.
-
-    Args:
-        split: Partition to load. Must be ``"train"``, ``"val"`` or ``"test"``.
-        csv_path: Path to the manifest CSV. Defaults to
-            ``datasets/dataset_split.csv``.
-        random_seed: Seed for the shuffle. Pass an int to reproduce a specific
-            ordering (e.g. in tests); pass ``None`` for a fresh ordering each run.
-
-    Yields:
-        ``(image, label)`` where ``image`` is the decoded picture in BGR format
-        (OpenCV convention) with shape ``(height, width, 3)`` and dtype
-        ``uint8``, and ``label`` is the integer class label (0 for Real, 1 for
-        Deepfake) from the same manifest row.
-
-    Raises:
-        ValueError: If ``split`` is not a recognized partition name.
-        FileNotFoundError: If the manifest CSV is missing.
-
-    Example:
-        >>> for image, label in get_feature_stream("train"):
-        ...     print(image.shape, label)
+    The (path, label) rows are loaded and shuffled up front, then images decode
+    one at a time in that order. Seed the shuffle with random_seed for a
+    reproducible ordering, or None for a fresh one. Images are BGR uint8; labels
+    are 0 (real) / 1 (deepfake).
     """
     entries = _load_entries(split, csv_path)
 
-    # Shuffle the lightweight (path, label) rows so the stream is randomized
-    # rather than following dataset/file order. A local Random instance keeps the
-    # shuffle reproducible (when seeded) without touching global RNG state.
+    # Shuffle the cheap (path, label) rows so the stream isn't in file/class order.
+    # A local Random keeps it reproducible without touching global RNG state.
     random.Random(random_seed).shuffle(entries)
 
     for path, label in entries:

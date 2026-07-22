@@ -1,13 +1,9 @@
 """Model assembly and hyperparameter tuning.
 
-The feature front-end (:mod:`trainbase.features`) already delivers reduced,
-standardized vectors, so the estimator here is *just the classifier*. Two
-functions cover the model side of a run:
-
-  * :func:`build_estimator` wraps the chosen registry classifier in a one-step
-    sklearn :class:`~sklearn.pipeline.Pipeline` under the name ``"clf"``.
-  * :func:`tune_hyperparameters` grid-searches that estimator, selecting on the
-    *validation* split (not k-fold CV), then refits the winner on train+val.
+The feature front-end already delivers reduced, standardized vectors, so the
+estimator here is just the classifier. build_estimator wraps it in a one-step
+sklearn Pipeline; tune_hyperparameters grid-searches on the validation split
+(not k-fold CV), then refits the winner on train+val.
 """
 
 from __future__ import annotations
@@ -25,25 +21,10 @@ logger = logging.getLogger(__name__)
 
 
 def build_estimator(model_name: str) -> Pipeline:
-    """Assemble the sklearn ``Pipeline`` — just the classifier.
+    """Wrap the registry classifier in a one-step 'clf' Pipeline.
 
-    PCA and per-feature standardization are done upstream by the feature
-    pipeline, so the features reaching this estimator are already reduced and
-    scaled. The estimator is therefore a single-step ``Pipeline`` wrapping the
-    classifier under the name ``"clf"``.
-
-    The one-step ``Pipeline`` is kept (rather than a bare estimator) so the
-    ``GridSearchCV`` grids stay ``clf__``-prefixed and the classifier-swap
-    mechanism in :data:`MODEL_REGISTRY` is unchanged.
-
-    Args:
-        model_name: Key into :data:`MODEL_REGISTRY`.
-
-    Returns:
-        An unfitted sklearn :class:`~sklearn.pipeline.Pipeline` (``clf`` only).
-
-    Raises:
-        KeyError: If ``model_name`` is not registered (caught by the caller).
+    Reduction and scaling happen upstream, so this is just the classifier. The
+    one-step Pipeline keeps the GridSearchCV grids 'clf__'-prefixed.
     """
     spec = MODEL_REGISTRY[model_name]
     return Pipeline(steps=[("clf", spec.factory())])
@@ -58,30 +39,12 @@ def tune_hyperparameters(
     y_val: np.ndarray,
     scoring: str = "f1",
 ) -> GridSearchCV:
-    """Grid-search hyperparameters, selecting on the *validation* split.
+    """Grid-search hyperparameters, scoring on the validation split.
 
-    The ``val`` split explicitly drives tuning via
-    :class:`~sklearn.model_selection.PredefinedSplit`: train and val are
-    concatenated, and the fold definition marks train rows as "never validate"
-    (``-1``) and val rows as the single validation fold (``0``). So every
-    candidate is *fit on train* and *scored on val* — a true holdout, not k-fold
-    CV on a mixed pool.
-
-    With ``refit=True`` (default), ``GridSearchCV`` then refits the best
-    configuration on train+val combined, the standard "use all the data you
-    tuned with" step before test evaluation.
-
-    Args:
-        estimator: The unfitted pipeline from :func:`build_estimator`.
-        param_grid: Hyperparameter grid (``clf__`` prefixed keys).
-        X_train, y_train: Training features/labels (used to fit candidates).
-        X_val, y_val: Validation features/labels (used to score candidates).
-        scoring: Metric to optimize. F1 balances precision/recall on this
-            roughly-balanced task.
-
-    Returns:
-        The fitted :class:`GridSearchCV`, whose ``best_estimator_`` is the model
-        refit on train+val.
+    Uses PredefinedSplit over concatenated train+val (train marked -1, val fold
+    0), so every candidate is fit on train and scored on val — a true holdout,
+    not k-fold CV. refit=True then refits the winner on train+val. best_estimator_
+    is that refit model.
     """
     # Concatenate the two splits; the fold array keeps their roles distinct.
     X = np.vstack([X_train, X_val])
@@ -105,7 +68,7 @@ def tune_hyperparameters(
         param_grid=param_grid,
         scoring=scoring,
         cv=predefined,
-        refit=True,       # refit the winner on train+val before we touch test
+        refit=True,       # refit the winner on train+val before test
         n_jobs=-1,
         verbose=1,
     )

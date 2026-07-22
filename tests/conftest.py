@@ -1,27 +1,8 @@
-"""
-Shared pytest fixtures for the preprocessing test suite.
+"""Shared pytest fixtures for the test suite.
 
-Everything here is deliberately lightweight: synthetic in-memory images and
-small batches so the unit tests run in milliseconds without touching disk,
-the network, or the ~500 MB VGG16 ImageNet weights. Heavy/optional paths
-(VGG16, real downloads) are exercised through mocks defined alongside the
-fixtures below.
-
-Fixture cheat-sheet
--------------------
-    rng                  -> seeded numpy Generator (reproducible randomness)
-    color_image          -> (224, 224, 3) uint8 BGR-style image
-    gray_image           -> (224, 224)    uint8 grayscale image
-    small_color_image    -> (32, 32, 3)   uint8 image (fast pipeline tests)
-    image_batch          -> list[np.ndarray] of color images (default 6)
-    feature_matrix       -> (n_samples, n_features) float32 matrix
-    matrix_stack         -> (24, 32, 32)    float32 grayscale image stack
-    color_matrix_stack   -> (24, 32, 32, 3) float32 multi-channel image stack
-    tmp_image_file       -> path to a real PNG written to a tmp dir
-    fake_vgg16           -> seeds the module-level VGG16 cache with a stub model
-    feature_split        -> SimpleNamespace of small separable train/val/test feature splits
-    pixel_split          -> SimpleNamespace of small separable train/val/test flat-pixel splits
-    image_label_pairs    -> list[(uint8 image, int label)] for a mocked feature stream
+All data is synthetic, in-memory, and seeded so tests run in milliseconds
+without touching disk, network, or the VGG16 weights. Heavy/optional paths are
+mocked (see _FakeVGG16 and the fake_vgg16 fixture).
 """
 
 from __future__ import annotations
@@ -79,34 +60,19 @@ def feature_matrix(rng) -> np.ndarray:
 
 @pytest.fixture
 def matrix_stack(rng) -> np.ndarray:
-    """A (24, 32, 32) float32 stack of single-channel image matrices.
-
-    The natural input to the matrix reduction subgroup (``mat-pca`` / ``mat-jl``):
-    one 2D matrix per sample, as produced by a pipeline that omits ``vectorize``.
-    """
+    """A (24, 32, 32) float32 grayscale image stack for the mat-* reducers."""
     return rng.random(size=(24, 32, 32), dtype=np.float64).astype(np.float32)
 
 
 @pytest.fixture
 def color_matrix_stack(rng) -> np.ndarray:
-    """A (24, 32, 32, 3) float32 stack of multi-channel (BGR/RGB) image matrices.
-
-    The colour counterpart of ``matrix_stack``: one ``(height, width, channels)``
-    image per sample, as produced by a pipeline that omits both ``grayscale``
-    and ``vectorize``. Feeds the matrix reduction subgroup's multi-channel path,
-    where only the width axis is reduced and the channel axis is preserved.
-    """
+    """A (24, 32, 32, 3) float32 colour image stack for the mat-* colour path."""
     return rng.random(size=(24, 32, 32, 3), dtype=np.float64).astype(np.float32)
 
 
 @pytest.fixture
 def tmp_image_file(tmp_path, color_image) -> str:
-    """
-    Write a real PNG to a temp dir and return its path.
-
-    Used to exercise the OpenCV file-loading path (load_image_from_file)
-    against an actual decodable file rather than a mock.
-    """
+    """Write a real PNG to a temp dir and return its path, for load_image_from_file."""
     import cv2
 
     path = os.path.join(str(tmp_path), "sample.png")
@@ -114,21 +80,14 @@ def tmp_image_file(tmp_path, color_image) -> str:
     return path
 
 
-# ---------------------------------------------------------------------------
-# VGG16 stub
-# ---------------------------------------------------------------------------
-
 class _FakeVGG16:
-    """
-    Minimal stand-in for a keras VGG16(include_top=False) model.
+    """Stub keras VGG16(include_top=False): returns a (n, 7, 7, 512) random map.
 
-    The real model's ``predict`` on a 224x224x3 input returns a
-    (1, 7, 7, 512) feature map (25 088 values once flattened). We reproduce
-    exactly that shape with cheap random data so vectorize_image's vgg16 path
-    can be tested for output shape/dtype without loading ImageNet weights.
+    Reproduces the real block5_pool output shape (25,088 flattened) cheaply,
+    without loading ImageNet weights.
     """
 
-    output_size = 7 * 7 * 512  # 25 088, matching real block5_pool for 224x224
+    output_size = 7 * 7 * 512  # 25,088, matching block5_pool for 224x224
 
     def predict(self, batch, verbose=0):  # noqa: D401 - mimics keras signature
         n = batch.shape[0]
@@ -137,13 +96,9 @@ class _FakeVGG16:
 
 @pytest.fixture
 def fake_vgg16(monkeypatch):
-    """
-    Seed the module-level VGG16 cache with a stub so method='vgg16' is fast.
+    """Seed the VGG16 cache with the stub so method='vgg16' skips keras entirely.
 
-    ``vectorize_image`` looks up ``_vgg16_models[input_size]`` and only imports
-    keras + downloads weights on a cache miss. By pre-seeding the cache for the
-    default (224, 224) input size we bypass that entirely. Returns the expected
-    flattened output length so tests can assert on it.
+    Returns the expected flattened output length for assertions.
     """
     from preprocessing import vectorize
 
@@ -151,31 +106,19 @@ def fake_vgg16(monkeypatch):
     return _FakeVGG16.output_size
 
 
-# ---------------------------------------------------------------------------
-# trainbase fixtures — small synthetic model-ready data
-# ---------------------------------------------------------------------------
-# The fixtures above feed the per-image *preprocessing* tests. The two below
-# feed the *trainbase* tests (model assembly, tuning, evaluation, feature
-# caching), which work on already-reduced feature matrices and on the
-# (image, label) stream rather than on raw images. Everything stays tiny and
-# seeded so model fitting / grid search run in milliseconds and deterministically.
+# trainbase fixtures: tiny seeded model-ready data so fitting/grid search stay instant.
 
 
 @pytest.fixture
 def feature_split(rng) -> SimpleNamespace:
-    """A small, linearly-separable 2-class feature split (train/val/test).
+    """A tiny linearly-separable 2-class train/val/test feature split.
 
-    Returns a namespace with ``X_train``/``y_train``, ``X_val``/``y_val`` and
-    ``X_test``/``y_test``: tight Gaussian blobs centred at -1.5 (class 0) and
-    +1.5 (class 1) in 5-D, so a linear classifier separates them cleanly and
-    metrics come out non-degenerate. Features are ``float32`` and labels are
-    ``int`` — exactly the shape/dtype the feature front-end emits and the
-    estimators/evaluation consume. Deliberately tiny (16 train / 8 val / 10
-    test) to keep ``GridSearchCV`` instant.
+    Tight 5-D Gaussian blobs at -1.5 (class 0) and +1.5 (class 1), float32
+    features and int labels, sized 16/8/10 to keep GridSearchCV instant.
     """
 
     def block(center: float, n: int) -> np.ndarray:
-        # Tight blob (std 0.4) so the two classes stay well separated.
+        # Tight blob (std 0.4) keeps the classes well separated.
         return (rng.standard_normal((n, 5)).astype(np.float32) * 0.4 + center)
 
     def split(n_per: int) -> Tuple[np.ndarray, np.ndarray]:
@@ -183,9 +126,9 @@ def feature_split(rng) -> SimpleNamespace:
         y = np.array([0] * n_per + [1] * n_per, dtype=int)
         return X, y
 
-    X_train, y_train = split(8)   # 16 rows, balanced
-    X_val, y_val = split(4)       #  8 rows, balanced
-    X_test, y_test = split(5)     # 10 rows, balanced
+    X_train, y_train = split(8)   # 16 rows
+    X_val, y_val = split(4)       #  8 rows
+    X_test, y_test = split(5)     # 10 rows
     return SimpleNamespace(
         X_train=X_train, y_train=y_train,
         X_val=X_val, y_val=y_val,
@@ -195,12 +138,10 @@ def feature_split(rng) -> SimpleNamespace:
 
 @pytest.fixture
 def pixel_split(rng) -> SimpleNamespace:
-    """Tiny separable flat-pixel splits for the torch image models.
+    """Tiny separable flat-pixel splits for the torch models.
 
-    Emulates the ``pixels`` pipeline output: flat 8x8 grayscale vectors (64
-    features) in [0, 1]. Class 0 is dim (~0.2), class 1 is bright (~0.8), so a
-    small CNN/ViT separates them in a couple of epochs. Deliberately tiny so a
-    forward/backward pass runs in milliseconds.
+    Emulates the pixels pipeline: flat 8x8 grayscale vectors in [0, 1], class 0
+    dim (~0.2) and class 1 bright (~0.8), so a small CNN/ViT separates them fast.
     """
     side = 8
     f = side * side
@@ -227,13 +168,10 @@ def pixel_split(rng) -> SimpleNamespace:
 
 @pytest.fixture
 def image_label_pairs(rng) -> List[Tuple[np.ndarray, int]]:
-    """A list of 7 ``(image, label)`` pairs backing a mocked feature stream.
+    """7 (uint8 BGR image, int label) pairs backing a mocked feature stream.
 
-    Mirrors what :func:`extract_features.get_feature_stream` yields — small
-    ``uint8`` BGR images paired with int labels — so ``load_images`` can be
-    exercised (subsampling, label aggregation, empty-stream handling) without
-    a manifest CSV or any real image files. Seven pairs lets a ``max_samples``
-    cap fall strictly inside the stream.
+    Mirrors get_feature_stream so load_images can be tested without a manifest.
+    Seven pairs lets a max_samples cap fall strictly inside the stream.
     """
     return [
         (rng.integers(0, 256, size=(8, 8, 3), dtype=np.uint8), i % 2)

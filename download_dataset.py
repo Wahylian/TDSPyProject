@@ -42,11 +42,8 @@ def main() -> None:
     this module has no side effects — the download only runs when the script is
     executed directly.
     """
-    # Make kagglehub download into the project's 'datasets' folder instead of the
-    # default ~/.cache/kagglehub location. kagglehub appends its own
-    # 'datasets/<owner>/<name>/versions/<n>' tree under KAGGLEHUB_CACHE, so
-    # pointing the cache at the project root lands the files inside the existing
-    # 'datasets' folder. Must be set before kagglehub is imported.
+    # Point KAGGLEHUB_CACHE at the project root so the download lands under the
+    # project's 'datasets' folder. Must be set before kagglehub is imported.
     os.environ["KAGGLEHUB_CACHE"] = str(Path(__file__).parent)
     import kagglehub
 
