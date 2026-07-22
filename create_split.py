@@ -1,27 +1,9 @@
-"""
-Generate a train/val/test split manifest for the deepdetect-2025 image dataset.
+"""Write a train/val/test split manifest for the deepdetect-2025 dataset.
 
-Scans the on-disk dataset directory — which contains a ``real`` and a
-``fake`` subfolder of ``.jpg``/``.png`` images — and writes a single CSV manifest
-describing every image with these columns:
-
-    photo_name  the image filename (e.g. ``real_000123.jpg``)
-    photo_path  the image path relative to the project root, using forward slashes
-    label       integer class label: 0 for real, 1 for fake
-    split       the assigned partition: "train", "val", or "test"
-
-The images are shuffled with a seeded RNG (default seed 42) and partitioned
-70% / 15% / 15% into train / val / test, so re-running with the same seed
-reproduces an identical manifest. The manifest is consumed downstream by
-``extract_features.py`` to stream ``(image, label)`` pairs per split.
-
-Typical usage::
-
-    python create_split.py                 # use defaults (seed 42)
-    python create_split.py --seed 7        # different shuffle
-
-Requirements:
-    pip install pandas
+Scans the real/ and fake/ image subfolders and writes one CSV with columns
+photo_name, photo_path (relative, forward slashes), label (0 real, 1 fake), and
+split. Rows are shuffled with a seeded RNG and partitioned 70/15/15, so a fixed
+seed reproduces the manifest. extract_features.py consumes it downstream.
 """
 
 from __future__ import annotations
@@ -33,50 +15,31 @@ from typing import Dict
 
 import pandas as pd
 
-# Directory of this script. Image paths are written relative to it so the
-# manifest stays valid regardless of the caller's working directory.
+# Image paths are written relative to this dir so the manifest stays portable.
 PROJECT_DIR = Path(__file__).resolve().parent
 
-# Default location of the image dataset (the folder holding real/ and fake/),
-# as downloaded and restructured by download_dataset.py. kagglehub stores it
-# under a versioned cache path; version 1 is the dataset currently on disk.
+# Dataset folder (holding real/ and fake/) as laid out by download_dataset.py.
 DEFAULT_DATA_DIR = (
     PROJECT_DIR / "datasets" / "ayushmandatta1" / "deepdetect-2025" / "versions" / "1"
 )
 
-# Default output path for the generated split manifest.
 DEFAULT_OUTPUT_CSV = PROJECT_DIR / "datasets" / "dataset_split.csv"
 
-# Map each class subfolder name to its integer label.
+# Class subfolder to integer label.
 LABEL_BY_FOLDER: Dict[str, int] = {"real": 0, "fake": 1}
 
-# Image file patterns to scan (the dataset mixes .jpg and .png images).
+# The dataset mixes .jpg and .png images.
 IMAGE_PATTERNS = ("*.jpg", "*.png")
 
-# Fraction of images assigned to each partition. The test split takes the
-# remainder so the three fractions always sum to exactly the dataset size.
+# Per-partition fractions; test takes the remainder so they sum to the dataset size.
 TRAIN_FRACTION = 0.70
 VAL_FRACTION = 0.15
 
-# Output column order of the manifest CSV.
 COLUMNS = ["photo_name", "photo_path", "label", "split"]
 
 
 def _scan_images(data_dir: Path) -> pd.DataFrame:
-    """Collect every ``.jpg``/``.png`` image under the real/ and fake/ subfolders.
-
-    Args:
-        data_dir: Directory containing the ``real`` and ``fake`` subfolders.
-
-    Returns:
-        A DataFrame with one row per image and the columns ``photo_name``,
-        ``photo_path`` (relative to the project root, forward slashes) and
-        ``label`` (0 for real, 1 for fake).
-
-    Raises:
-        FileNotFoundError: If ``data_dir`` or one of its class subfolders is
-            missing.
-    """
+    """Collect every image under real/ and fake/ into a (name, path, label) frame."""
     if not data_dir.is_dir():
         raise FileNotFoundError(f"Dataset directory does not exist: {data_dir}")
 
@@ -86,16 +49,13 @@ def _scan_images(data_dir: Path) -> pd.DataFrame:
         if not class_dir.is_dir():
             raise FileNotFoundError(f"Expected class subfolder is missing: {class_dir}")
 
-        # Collect all supported image types, then sort so the scan order is
-        # deterministic; the final row order is decided by the seeded shuffle in
-        # _assign_splits, not here.
+        # Sort for a deterministic scan; the seeded shuffle sets the final order.
         image_paths = [p for pattern in IMAGE_PATTERNS for p in class_dir.glob(pattern)]
         for image_path in sorted(image_paths):
             rows.append(
                 {
                     "photo_name": image_path.name,
-                    # Store the path relative to the project root with forward
-                    # slashes so the manifest is portable across machines/OSes.
+                    # Relative, forward-slashed path for cross-OS portability.
                     "photo_path": os.path.relpath(image_path, PROJECT_DIR).replace(os.sep, "/"),
                     "label": label,
                 }
@@ -105,27 +65,15 @@ def _scan_images(data_dir: Path) -> pd.DataFrame:
 
 
 def _assign_splits(df: pd.DataFrame, seed: int) -> pd.DataFrame:
-    """Shuffle the rows and label each with a train/val/test partition.
-
-    Args:
-        df: The scanned image DataFrame (photo_name, photo_path, label).
-        seed: Seed for the shuffle, making the partition reproducible.
-
-    Returns:
-        A new DataFrame, shuffled and carrying an added ``split`` column, with
-        sizes ``int(0.70 * n)`` / ``int(0.15 * n)`` / remainder for
-        train / val / test respectively.
-    """
-    # Shuffle every row with a seeded RNG so the partition is random yet
-    # reproducible for a fixed seed.
+    """Seeded-shuffle the rows and add a train/val/test split column."""
+    # Seeded shuffle: random yet reproducible for a fixed seed.
     shuffled = df.sample(frac=1, random_state=seed).reset_index(drop=True)
 
     n = len(shuffled)
     n_train = int(TRAIN_FRACTION * n)
     n_val = int(VAL_FRACTION * n)
 
-    # Assign partitions by position in the shuffled order; "test" absorbs the
-    # remainder so every row is covered exactly once.
+    # Assign by position; test absorbs the remainder so every row is covered once.
     split_labels = (
         ["train"] * n_train
         + ["val"] * n_val
@@ -140,21 +88,7 @@ def create_split(
     output_csv: Path = DEFAULT_OUTPUT_CSV,
     seed: int = 42,
 ) -> pd.DataFrame:
-    """Scan the dataset, build a 70/15/15 split, and write the manifest CSV.
-
-    Args:
-        data_dir: Directory containing the ``real`` and ``fake`` subfolders.
-        output_csv: Path the manifest CSV is written to. Parent directories are
-            created if needed.
-        seed: Seed for the reproducible shuffle. Defaults to 42.
-
-    Returns:
-        The manifest DataFrame that was written, with columns
-        ``photo_name``, ``photo_path``, ``label`` and ``split``.
-
-    Raises:
-        FileNotFoundError: If ``data_dir`` or a class subfolder is missing.
-    """
+    """Scan the dataset, build a 70/15/15 split, write and return the manifest."""
     data_dir = Path(data_dir)
     output_csv = Path(output_csv)
 

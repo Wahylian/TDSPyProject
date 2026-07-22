@@ -1,20 +1,10 @@
-"""
-Tests for ``trainbase/artifacts.py`` — run persistence and metadata assembly.
+"""Tests for trainbase/artifacts.py, run persistence and metadata assembly.
 
-:func:`save_artifacts` writes an isolated run bundle
-(``<base>/<model>/<run_id>/``) holding the fitted classifier (joblib), the
-fitted feature pipeline (joblib), and the uniform ``metadata.json``. These tests
-pin the layout, that missing parent directories are created, that reruns are
-isolated (no overwrite), that the metadata round-trips through JSON, and that the
-two joblib artifacts reload into equivalent objects.
-
-:func:`build_metadata` assembles the uniform record; a test pins its schema —
-the five headline metrics under ``evaluation_metrics``, and the confusion matrix
-folded into ``diagnostics``.
-
-A tiny fitted ``DummyClassifier`` and a trivial real ``ImagePipeline`` stand in
-for the heavy real artifacts so the round-trip stays fast and pickling is real
-(no mocks, which don't pickle).
+save_artifacts writes a run bundle (model.joblib, feature_pipeline.joblib,
+metadata.json) into <base>/<model>/<run_id>/; these pin the layout, dir creation,
+rerun isolation, JSON round-trip, and joblib reload. build_metadata's schema is
+pinned separately. A DummyClassifier and a trivial ImagePipeline stand in so
+pickling is real (mocks don't pickle).
 """
 
 from __future__ import annotations
@@ -50,7 +40,7 @@ class TestSaveArtifacts:
     """Serializing the model, feature pipeline, and metadata into a run dir."""
 
     def test_writes_run_bundle(self, tmp_path, fitted_artifacts):
-        """The three artifacts land in ``<base>/<model>/<run_id>/`` and the dir is returned."""
+        """The three artifacts land in <base>/<model>/<run_id>/, which is returned."""
         model, pipeline, metadata = fitted_artifacts
         run_dir = save_artifacts(
             model, pipeline, metadata, tmp_path, model_name="svm", run_id="20260720_120000"
@@ -62,7 +52,7 @@ class TestSaveArtifacts:
         assert (run_dir / "metadata.json").is_file()
 
     def test_creates_missing_parent_dirs(self, tmp_path, fitted_artifacts):
-        """A non-existent base directory (and the model/run subdirs) are created."""
+        """A non-existent base directory and the model/run subdirs are created."""
         model, pipeline, metadata = fitted_artifacts
         base = tmp_path / "artifacts"
         assert not base.exists()
@@ -74,7 +64,7 @@ class TestSaveArtifacts:
         assert (run_dir / "metadata.json").is_file()
 
     def test_reruns_are_isolated(self, tmp_path, fitted_artifacts):
-        """Two runs of the same model write to distinct run dirs — no overwrite."""
+        """Two runs of the same model write to distinct run dirs, no overwrite."""
         model, pipeline, metadata = fitted_artifacts
         first = save_artifacts(model, pipeline, metadata, tmp_path, "svm", "20260720_120000")
         second = save_artifacts(model, pipeline, metadata, tmp_path, "svm", "20260720_120001")
@@ -93,11 +83,7 @@ class TestSaveArtifacts:
         assert reloaded == metadata
 
     def test_joblib_artifacts_reload_into_equivalent_objects(self, tmp_path, fitted_artifacts):
-        """The model and pipeline reload into working, equivalent objects.
-
-        The reloaded pipeline keeps its operation list, and the reloaded model
-        still predicts the most-frequent class (0) it was fit on.
-        """
+        """The model and pipeline reload into working, equivalent objects."""
         model, pipeline, metadata = fitted_artifacts
         run_dir = save_artifacts(model, pipeline, metadata, tmp_path, "svm", "20260720_120000")
 
@@ -105,7 +91,7 @@ class TestSaveArtifacts:
         reloaded_model = joblib.load(run_dir / "model.joblib")
 
         assert reloaded_pipeline.operations == pipeline.operations
-        # Majority class of the fit labels was 0; the reloaded model still says 0.
+        # Majority class of the fit labels was 0.
         assert list(reloaded_model.predict(np.zeros((3, 2)))) == [0, 0, 0]
 
 
@@ -134,7 +120,7 @@ class TestBuildMetadata:
         )
 
     def test_headline_metrics_extracted(self):
-        """``evaluation_metrics`` holds exactly the five standardized headline keys."""
+        """evaluation_metrics holds exactly the five standardized headline keys."""
         meta = self._call()
         assert set(meta["evaluation_metrics"]) == set(HEADLINE_METRICS)
         assert set(meta["baseline_metrics"]) == set(HEADLINE_METRICS)
@@ -142,11 +128,10 @@ class TestBuildMetadata:
         assert meta["evaluation_metrics"]["pr_auc"] == 0.93
 
     def test_confusion_matrix_folded_into_diagnostics(self):
-        """The confusion matrix and report move under ``diagnostics``."""
+        """The confusion matrix and report move under diagnostics."""
         meta = self._call()
         assert meta["diagnostics"]["confusion_matrix"] == [[45, 5], [4, 46]]
         assert meta["diagnostics"]["classification_report"] == "report-text"
-        # Estimator-specific diagnostics are preserved alongside.
         assert "hyperparameter_scores" in meta["diagnostics"]
 
     def test_top_level_schema_is_uniform(self):
