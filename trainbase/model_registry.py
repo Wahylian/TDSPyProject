@@ -68,7 +68,7 @@ MODEL_REGISTRY: Dict[str, ModelSpec] = {
     ),
     # Hard-margin SVM: a huge C removes the slack. LinearSVC is the fast linear form.
     "hard_svm": ModelSpec(
-        factory=lambda: LinearSVC(C=1e6, random_state=RANDOM_STATE),
+        factory=lambda: LinearSVC(C=1e6, max_iter=10_000, random_state=RANDOM_STATE),
         param_grid={"clf__C": [1e4, 1e6]},
     ),
     # Same hard margin via the kernel SVC with a linear kernel, for a like-for-like compare.
