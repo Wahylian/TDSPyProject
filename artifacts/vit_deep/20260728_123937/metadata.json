@@ -1,0 +1,95 @@
+{
+  "model_name": "vit_deep",
+  "run_id": "20260728_123937",
+  "timestamp": "2026-07-28T12:39:37",
+  "pipeline_used": "pixels_hq",
+  "pipeline_spec": null,
+  "pipeline_steps": [
+    [
+      "grayscale",
+      {}
+    ],
+    [
+      "resize",
+      {
+        "target_size": [
+          128,
+          128
+        ],
+        "preserve_aspect": true
+      }
+    ],
+    [
+      "normalize",
+      {
+        "method": "minmax",
+        "value_range": [
+          0.0,
+          1.0
+        ]
+      }
+    ],
+    [
+      "vectorize",
+      {
+        "preserve_structure": false
+      }
+    ]
+  ],
+  "scoring": "f1",
+  "sample_sizes": {
+    "train": 5000,
+    "val": 2000,
+    "test": 5000
+  },
+  "hyperparameters": {
+    "clf__lr": 0.0003
+  },
+  "best_val_score": 0.707836014530358,
+  "evaluation_metrics": {
+    "accuracy": 0.7558,
+    "precision": 0.710853023628354,
+    "recall": 0.7805628847845206,
+    "pr_auc": 0.8196311009366589,
+    "roc_auc": 0.8403949620934215
+  },
+  "baseline_metrics": {
+    "accuracy": 0.5452,
+    "precision": 0.0,
+    "recall": 0.0,
+    "pr_auc": 0.4548,
+    "roc_auc": 0.5
+  },
+  "diagnostics": {
+    "confusion_matrix": [
+      [
+        2004,
+        722
+      ],
+      [
+        499,
+        1775
+      ]
+    ],
+    "classification_report": "              precision    recall  f1-score   support\n\n        real       0.80      0.74      0.77      2726\n        fake       0.71      0.78      0.74      2274\n\n    accuracy                           0.76      5000\n   macro avg       0.76      0.76      0.76      5000\nweighted avg       0.76      0.76      0.76      5000\n",
+    "feature_importances": null,
+    "oob_score": null,
+    "hyperparameter_scores": [
+      {
+        "params": {
+          "clf__lr": 0.001
+        },
+        "mean_val_score": 0.0,
+        "std_val_score": 0.0
+      },
+      {
+        "params": {
+          "clf__lr": 0.0003
+        },
+        "mean_val_score": 0.707836014530358,
+        "std_val_score": 0.0
+      }
+    ],
+    "learning_curve": null
+  }
+}
