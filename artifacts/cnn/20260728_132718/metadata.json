@@ -1,0 +1,95 @@
+{
+  "model_name": "cnn",
+  "run_id": "20260728_132718",
+  "timestamp": "2026-07-28T13:27:18",
+  "pipeline_used": "pixels",
+  "pipeline_spec": null,
+  "pipeline_steps": [
+    [
+      "grayscale",
+      {}
+    ],
+    [
+      "resize",
+      {
+        "target_size": [
+          64,
+          64
+        ],
+        "preserve_aspect": true
+      }
+    ],
+    [
+      "normalize",
+      {
+        "method": "minmax",
+        "value_range": [
+          0.0,
+          1.0
+        ]
+      }
+    ],
+    [
+      "vectorize",
+      {
+        "preserve_structure": false
+      }
+    ]
+  ],
+  "scoring": "f1",
+  "sample_sizes": {
+    "train": 5000,
+    "val": 2000,
+    "test": 5000
+  },
+  "hyperparameters": {
+    "clf__lr": 0.001
+  },
+  "best_val_score": 0.7520661157024794,
+  "evaluation_metrics": {
+    "accuracy": 0.7612,
+    "precision": 0.7488479262672811,
+    "recall": 0.7145998240985049,
+    "pr_auc": 0.8090737757656725,
+    "roc_auc": 0.8422456865094651
+  },
+  "baseline_metrics": {
+    "accuracy": 0.5452,
+    "precision": 0.0,
+    "recall": 0.0,
+    "pr_auc": 0.4548,
+    "roc_auc": 0.5
+  },
+  "diagnostics": {
+    "confusion_matrix": [
+      [
+        2181,
+        545
+      ],
+      [
+        649,
+        1625
+      ]
+    ],
+    "classification_report": "              precision    recall  f1-score   support\n\n        real       0.77      0.80      0.79      2726\n        fake       0.75      0.71      0.73      2274\n\n    accuracy                           0.76      5000\n   macro avg       0.76      0.76      0.76      5000\nweighted avg       0.76      0.76      0.76      5000\n",
+    "feature_importances": null,
+    "oob_score": null,
+    "hyperparameter_scores": [
+      {
+        "params": {
+          "clf__lr": 0.001
+        },
+        "mean_val_score": 0.7520661157024794,
+        "std_val_score": 0.0
+      },
+      {
+        "params": {
+          "clf__lr": 0.0003
+        },
+        "mean_val_score": 0.7247807017543859,
+        "std_val_score": 0.0
+      }
+    ],
+    "learning_curve": null
+  }
+}
