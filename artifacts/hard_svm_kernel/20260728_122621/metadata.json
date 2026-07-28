@@ -1,0 +1,114 @@
+{
+  "model_name": "hard_svm_kernel",
+  "run_id": "20260728_122621",
+  "timestamp": "2026-07-28T12:26:21",
+  "pipeline_used": "svm",
+  "pipeline_spec": null,
+  "pipeline_steps": [
+    [
+      "grayscale",
+      {}
+    ],
+    [
+      "resize",
+      {
+        "target_size": [
+          128,
+          128
+        ],
+        "preserve_aspect": true
+      }
+    ],
+    [
+      "denoise",
+      {
+        "method": "bilateral",
+        "kernel_size": 5
+      }
+    ],
+    [
+      "normalize",
+      {
+        "method": "minmax",
+        "value_range": [
+          0.0,
+          1.0
+        ]
+      }
+    ],
+    [
+      "vectorize",
+      {
+        "preserve_structure": false
+      }
+    ],
+    [
+      "reduce",
+      {
+        "method": "vec-pca",
+        "n_components": 150,
+        "random_state": 42
+      }
+    ],
+    [
+      "scale",
+      {}
+    ]
+  ],
+  "scoring": "f1",
+  "sample_sizes": {
+    "train": 5000,
+    "val": 2000,
+    "test": 5000
+  },
+  "hyperparameters": {
+    "clf__C": 10000.0
+  },
+  "best_val_score": 0.5795880149812734,
+  "evaluation_metrics": {
+    "accuracy": 0.5796,
+    "precision": 0.526625386996904,
+    "recall": 0.7480211081794196,
+    "pr_auc": 0.5600126752163903,
+    "roc_auc": 0.6335770530498518
+  },
+  "baseline_metrics": {
+    "accuracy": 0.5452,
+    "precision": 0.0,
+    "recall": 0.0,
+    "pr_auc": 0.4548,
+    "roc_auc": 0.5
+  },
+  "diagnostics": {
+    "confusion_matrix": [
+      [
+        1197,
+        1529
+      ],
+      [
+        573,
+        1701
+      ]
+    ],
+    "classification_report": "              precision    recall  f1-score   support\n\n        real       0.68      0.44      0.53      2726\n        fake       0.53      0.75      0.62      2274\n\n    accuracy                           0.58      5000\n   macro avg       0.60      0.59      0.58      5000\nweighted avg       0.61      0.58      0.57      5000\n",
+    "feature_importances": null,
+    "oob_score": null,
+    "hyperparameter_scores": [
+      {
+        "params": {
+          "clf__C": 10000.0
+        },
+        "mean_val_score": 0.5795880149812734,
+        "std_val_score": 0.0
+      },
+      {
+        "params": {
+          "clf__C": 1000000.0
+        },
+        "mean_val_score": 0.5795880149812734,
+        "std_val_score": 0.0
+      }
+    ],
+    "learning_curve": null
+  }
+}

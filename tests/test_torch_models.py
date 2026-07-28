@@ -120,6 +120,43 @@ def test_explicit_device_is_honored_silently(Model, monkeypatch):
         assert Model(device="cpu")._device().type == "cpu"
 
 
+@pytest.mark.parametrize("Model", MODELS)
+def test_inference_device_prefers_cuda_without_warning(Model, monkeypatch):
+    """_inference_device resolves like _device but never warns (fit() already did)."""
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert Model()._inference_device().type == "cuda"
+
+
+@pytest.mark.parametrize("Model", MODELS)
+def test_inference_device_falls_back_to_cpu_without_warning(Model, monkeypatch):
+    """Unlike _device, a missing GPU doesn't make _inference_device warn."""
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert Model()._inference_device().type == "cpu"
+
+
+@pytest.mark.parametrize("Model", MODELS)
+def test_module_stays_cpu_resident_after_predict(Model, pixel_split):
+    """predict() may use the real device internally but leaves module_ on CPU
+    afterward, preserving fit()'s 'portable pickling' invariant."""
+    est = Model(epochs=1).fit(pixel_split.X_train, pixel_split.y_train)
+    est.predict(pixel_split.X_test)
+    assert next(est.module_.parameters()).device.type == "cpu"
+
+
+@pytest.mark.parametrize("Model", MODELS)
+def test_predict_does_not_warn_about_missing_gpu(Model, pixel_split, monkeypatch):
+    """Unlike fit(), predict() doesn't re-warn about a missing GPU on every call."""
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    est = Model(epochs=1).fit(pixel_split.X_train, pixel_split.y_train)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        est.predict(pixel_split.X_test)
+
+
 def test_build_torch_registry_shape():
     from trainbase.model_registry import ModelSpec
     reg = build_torch_registry()

@@ -84,6 +84,14 @@ class _TorchImageClassifier(BaseEstimator, ClassifierMixin):
         )
         return torch.device("cpu")
 
+    def _inference_device(self) -> "torch.device":
+        """Resolve the device for predict/predict_proba: same policy as _device,
+        minus the warning (fit() already warned once if this process has no GPU).
+        """
+        if self.device is not None:
+            return torch.device(self.device)
+        return torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+
     def fit(self, X, y):
         X = np.asarray(X, dtype=np.float32)
         y = np.asarray(y)
@@ -98,9 +106,12 @@ class _TorchImageClassifier(BaseEstimator, ClassifierMixin):
 
         module = self._build_module(self.image_shape_, n_classes).to(device)
         c, h, w = self.image_shape_
-        X_t = torch.from_numpy(X).view(-1, c, h, w).to(device)
+        # Kept on CPU; only each minibatch is moved to device (see the loop below),
+        # so a large image (e.g. 224x224x3 for a pretrained backbone) doesn't
+        # require the whole split to fit in GPU memory at once.
+        X_t = torch.from_numpy(X).view(-1, c, h, w)
         y_idx = np.searchsorted(self.classes_, y).astype(np.int64)
-        y_t = torch.from_numpy(y_idx).to(device)
+        y_t = torch.from_numpy(y_idx)
 
         opt = torch.optim.Adam(module.parameters(), lr=self.lr,
                                weight_decay=self.weight_decay)
@@ -112,7 +123,7 @@ class _TorchImageClassifier(BaseEstimator, ClassifierMixin):
             perm = rng.permutation(n)  # shuffled, seeded minibatches
             for start in range(0, n, bs):
                 sel = perm[start:start + bs]
-                xb, yb = X_t[sel], y_t[sel]
+                xb, yb = X_t[sel].to(device), y_t[sel].to(device)
                 opt.zero_grad()
                 loss = loss_fn(module(xb), yb)
                 loss.backward()
@@ -133,8 +144,23 @@ class _TorchImageClassifier(BaseEstimator, ClassifierMixin):
         c, h, w = self.image_shape_
         X_t = torch.from_numpy(X).view(-1, c, h, w)
         self.module_.eval()
-        with torch.no_grad():
-            return self.module_(X_t)
+        # Chunked (not one giant forward pass) so a large image (e.g. a pretrained
+        # backbone's 224x224x3 input) doesn't spike memory on a big test split.
+        bs = max(1, int(self.batch_size))
+        # fit() leaves module_ on CPU for portable pickling; predictions still
+        # run on the GPU when one's available, moving it back to CPU afterward
+        # so that invariant holds again once this call returns.
+        device = self._inference_device()
+        self.module_.to(device)
+        try:
+            with torch.no_grad():
+                chunks = [
+                    self.module_(X_t[start:start + bs].to(device)).cpu()
+                    for start in range(0, X_t.shape[0], bs)
+                ]
+        finally:
+            self.module_.to(torch.device("cpu"))
+        return torch.cat(chunks, dim=0)
 
     def predict_proba(self, X) -> np.ndarray:
         return torch.softmax(self._logits(X), dim=1).numpy()

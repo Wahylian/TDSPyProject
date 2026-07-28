@@ -155,6 +155,22 @@ class PrebuiltPipelines:
             ('vectorize', {'preserve_structure': False}),
         ])
 
+    @staticmethod
+    def pixels_pretrained_pipeline() -> ImagePipeline:
+        """224x224 RGB, minmax-normalized, channel-major flat pixels for a
+        pretrained torchvision backbone (trainbase/torch_pretrained_models.py).
+
+        No grayscale step: the backbone expects 3 channels. No PCA/JL reduce:
+        its own conv/patch stem consumes the full image. preserve_structure=True
+        keeps each channel contiguous (R block, then G, then B) so the flat
+        vector reshapes back to (3, 224, 224) in channel-major order.
+        """
+        return ImagePipeline([
+            ('resize', {'target_size': (224, 224), 'preserve_aspect': False}),
+            ('normalize', {'method': 'minmax', 'value_range': (0.0, 1.0)}),
+            ('vectorize', {'preserve_structure': True}),
+        ])
+
     # Vector reduction: vectorize, then reduce the flat vector. These share the
     # per-image stages and differ only in the trailing ('reduce', {...}) op.
 

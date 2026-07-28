@@ -14,7 +14,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import GridSearchCV
 from sklearn.pipeline import Pipeline
 
-from trainbase.training import build_estimator, tune_hyperparameters
+from trainbase.training import build_estimator, n_jobs_for, tune_hyperparameters
 
 
 class TestBuildEstimator:
@@ -87,3 +87,28 @@ class TestTuneHyperparameters:
             s.X_train, s.y_train, s.X_val, s.y_val,
         )
         assert search.best_score_ == pytest.approx(1.0)
+
+
+class TestNJobsFor:
+    """Sequential n_jobs for GPU-bound torch models; parallel for classical ones.
+
+    A shared GPU means parallel candidates would contend for one device instead
+    of speeding anything up, so torch image models get n_jobs=1.
+    """
+
+    def test_classical_model_gets_parallel_n_jobs(self):
+        assert n_jobs_for(build_estimator("logreg")) == -1
+
+    def test_torch_model_gets_sequential_n_jobs(self):
+        pytest.importorskip("torch")
+        assert n_jobs_for(build_estimator("cnn")) == 1
+
+    def test_tune_hyperparameters_passes_sequential_n_jobs_for_torch(self, pixel_split):
+        pytest.importorskip("torch")
+        s = pixel_split
+        estimator = build_estimator("cnn")
+        estimator.set_params(clf__epochs=1)
+        search = tune_hyperparameters(
+            estimator, {"clf__lr": [1e-3]}, s.X_train, s.y_train, s.X_val, s.y_val
+        )
+        assert search.n_jobs == 1

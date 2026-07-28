@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from trainbase.diagnostics import collect_diagnostics
 from trainbase.model_registry import MODEL_REGISTRY
 from trainbase.training import build_estimator, tune_hyperparameters
@@ -77,3 +79,33 @@ class TestCollectDiagnostics:
             assert set(lc) == {"train_sizes", "train_scores_mean", "val_scores_mean"}
             assert len(lc["train_sizes"]) == len(lc["train_scores_mean"]) == len(lc["val_scores_mean"])
         json.dumps(diag)
+
+
+class TestLearningCurveNJobs:
+    """The learning curve reuses n_jobs_for, so a torch model's candidates don't
+    contend for one shared GPU (see trainbase.training.n_jobs_for)."""
+
+    @pytest.mark.slow
+    def test_torch_model_learning_curve_runs_sequentially(self, pixel_split, monkeypatch):
+        pytest.importorskip("torch")
+        import trainbase.diagnostics as diagnostics_module
+
+        s = pixel_split
+        estimator = build_estimator("cnn")
+        estimator.set_params(clf__epochs=1)
+        search = tune_hyperparameters(
+            estimator, {"clf__lr": [1e-3]}, s.X_train, s.y_train, s.X_val, s.y_val
+        )
+
+        seen_n_jobs = {}
+        original = diagnostics_module.learning_curve
+
+        def spy(*args, **kwargs):
+            seen_n_jobs["value"] = kwargs.get("n_jobs")
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(diagnostics_module, "learning_curve", spy)
+        collect_diagnostics(
+            search, search.best_estimator_, s.X_train, s.y_train, include_curves=True
+        )
+        assert seen_n_jobs["value"] == 1

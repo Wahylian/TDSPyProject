@@ -30,6 +30,22 @@ def build_estimator(model_name: str) -> Pipeline:
     return Pipeline(steps=[("clf", spec.factory())])
 
 
+def n_jobs_for(estimator: Pipeline) -> int:
+    """-1 (all cores) for CPU-bound classical models.
+
+    Torch image models (cnn/vit and their pretrained-backbone variants) default
+    to one shared GPU (see _TorchImageClassifier._device), so process-parallel
+    candidates would contend for that single device rather than speed anything
+    up -- that trades a fast sequential GPU run for a slow, CPU-heavy,
+    barely-GPU-utilized one. Those get a sequential n_jobs=1 instead.
+    """
+    try:
+        from .torch_models import _TorchImageClassifier
+    except ImportError:
+        return -1
+    return 1 if isinstance(estimator.named_steps["clf"], _TorchImageClassifier) else -1
+
+
 def tune_hyperparameters(
     estimator: Pipeline,
     param_grid: Dict[str, list],
@@ -69,7 +85,7 @@ def tune_hyperparameters(
         scoring=scoring,
         cv=predefined,
         refit=True,       # refit the winner on train+val before test
-        n_jobs=-1,
+        n_jobs=n_jobs_for(estimator),
         verbose=1,
     )
     search.fit(X, y)

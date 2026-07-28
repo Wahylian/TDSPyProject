@@ -167,6 +167,38 @@ def pixel_split(rng) -> SimpleNamespace:
 
 
 @pytest.fixture
+def pretrained_pixel_split(rng) -> SimpleNamespace:
+    """Tiny separable flat RGB-pixel splits at (3, 224, 224) for the pretrained backbones.
+
+    Same bright/dim pattern as pixel_split, but channel-major (matching
+    'preserve_structure=True' vectorize) and sized for a pretrained ResNet18/
+    ViT-B/16 input. Kept tiny since even a random-init forward pass through a
+    full-size backbone isn't free.
+    """
+    shape = (3, 224, 224)
+    f = int(np.prod(shape))
+
+    def block(level: float, n: int) -> np.ndarray:
+        x = rng.normal(level, 0.05, size=(n,) + shape).astype(np.float32)
+        return np.clip(x, 0.0, 1.0).reshape(n, f)
+
+    def split(n: int):
+        X = np.vstack([block(0.2, n), block(0.8, n)]).astype(np.float32)
+        y = np.array([0] * n + [1] * n, dtype=int)
+        return X, y
+
+    X_train, y_train = split(3)
+    X_val, y_val = split(2)
+    X_test, y_test = split(2)
+    return SimpleNamespace(
+        X_train=X_train, y_train=y_train,
+        X_val=X_val, y_val=y_val,
+        X_test=X_test, y_test=y_test,
+        image_shape=shape,
+    )
+
+
+@pytest.fixture
 def image_label_pairs(rng) -> List[Tuple[np.ndarray, int]]:
     """7 (uint8 BGR image, int label) pairs backing a mocked feature stream.
 

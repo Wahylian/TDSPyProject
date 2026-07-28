@@ -24,7 +24,8 @@ pip install keras
 # CPU-only box? Use  https://download.pytorch.org/whl/cpu  with  torch==2.13.0+cpu
 --extra-index-url https://download.pytorch.org/whl/cu126
 torch==2.13.0+cu126
-# torchvision is not imported by this project; add it (matching +cu126) only if needed.
+# torchvision: pretrained ResNet18/ViT-B/16 backbones (trainbase/torch_pretrained_models.py).
+torchvision==0.28.0+cu126
 
 # pip install command for torch that uses gpu
 pip install torch --index-url https://download.pytorch.org/whl/cu126

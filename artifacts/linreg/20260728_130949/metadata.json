@@ -1,0 +1,119 @@
+{
+  "model_name": "linreg",
+  "run_id": "20260728_130949",
+  "timestamp": "2026-07-28T13:09:49",
+  "pipeline_used": "embedding_pca",
+  "pipeline_spec": null,
+  "pipeline_steps": [
+    [
+      "grayscale",
+      {}
+    ],
+    [
+      "resize",
+      {
+        "target_size": [
+          224,
+          224
+        ],
+        "preserve_aspect": true
+      }
+    ],
+    [
+      "vectorize",
+      {
+        "method": "vgg16"
+      }
+    ],
+    [
+      "reduce",
+      {
+        "method": "vec-pca",
+        "n_components": 150,
+        "random_state": 42
+      }
+    ],
+    [
+      "scale",
+      {}
+    ]
+  ],
+  "scoring": "f1",
+  "sample_sizes": {
+    "train": 5000,
+    "val": 2000,
+    "test": 5000
+  },
+  "hyperparameters": {
+    "clf__fit_intercept": true
+  },
+  "best_val_score": 0.7806925498426023,
+  "evaluation_metrics": {
+    "accuracy": 0.783,
+    "precision": 0.7471933471933472,
+    "recall": 0.7902374670184696,
+    "pr_auc": 0.8342760095482284,
+    "roc_auc": 0.8689975873232194
+  },
+  "baseline_metrics": {
+    "accuracy": 0.5452,
+    "precision": 0.0,
+    "recall": 0.0,
+    "pr_auc": 0.4548,
+    "roc_auc": 0.5
+  },
+  "diagnostics": {
+    "confusion_matrix": [
+      [
+        2118,
+        608
+      ],
+      [
+        477,
+        1797
+      ]
+    ],
+    "classification_report": "              precision    recall  f1-score   support\n\n        real       0.82      0.78      0.80      2726\n        fake       0.75      0.79      0.77      2274\n\n    accuracy                           0.78      5000\n   macro avg       0.78      0.78      0.78      5000\nweighted avg       0.78      0.78      0.78      5000\n",
+    "feature_importances": null,
+    "oob_score": null,
+    "hyperparameter_scores": [
+      {
+        "params": {
+          "clf__fit_intercept": true
+        },
+        "mean_val_score": 0.7806925498426023,
+        "std_val_score": 0.0
+      },
+      {
+        "params": {
+          "clf__fit_intercept": false
+        },
+        "mean_val_score": 0.1693936477382098,
+        "std_val_score": 0.0
+      }
+    ],
+    "learning_curve": {
+      "train_sizes": [
+        666,
+        1333,
+        1999,
+        2666,
+        3333
+      ],
+      "train_scores_mean": [
+        0.8411790738866799,
+        0.8189031164136935,
+        0.807383142368554,
+        0.8010517396641585,
+        0.7955436286922083
+      ],
+      "val_scores_mean": [
+        0.7200758574713859,
+        0.755415977184997,
+        0.7612051766525861,
+        0.7727299316297817,
+        0.7775776528239802
+      ]
+    }
+  }
+}
