@@ -169,6 +169,23 @@ class TestPixelPipelines:
         assert "pixels" in PIPELINE_REGISTRY
         assert "pixels_hq" in PIPELINE_REGISTRY
 
+    def test_pixels_pretrained_pipeline_emits_flat_rgb_224(self, image_batch):
+        """224x224 RGB, channel-major, no grayscale/reduce/scale step."""
+        from prebuilt_pipelines import PrebuiltPipelines
+        pipe = PrebuiltPipelines.pixels_pretrained_pipeline()
+        X = pipe.fit_transform(image_batch)
+        assert X.ndim == 2 and X.shape[1] == 3 * 224 * 224
+        assert 0.0 <= float(X.min()) and float(X.max()) <= 1.0
+        ops = [name for name, _ in pipe.operations]
+        assert "grayscale" not in ops
+        assert "reduce" not in ops and "scale" not in ops
+        assert pipe.operations[-1][0] == "vectorize"
+        assert pipe.operations[-1][1].get("preserve_structure") is True
+
+    def test_pixels_pretrained_registered(self):
+        from trainbase.pipeline_registry import PIPELINE_REGISTRY
+        assert "pixels_pretrained" in PIPELINE_REGISTRY
+
 
 class TestPipelineExecution:
     """A representative subset run end-to-end through batch_process."""

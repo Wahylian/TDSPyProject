@@ -16,12 +16,23 @@ CLASSICAL = "classical"
 
 
 def _torch_model_names() -> FrozenSet[str]:
-    """Names trainbase.torch_models contributes to MODEL_REGISTRY, if torch is installed."""
+    """Names trainbase's torch-backed registries contribute to MODEL_REGISTRY:
+    the from-scratch cnn/vit (torch_models) and the pretrained-backbone
+    cnn_pretrained/vit_pretrained (torch_pretrained_models). Each is present
+    only when its own optional dependency (torch, then torchvision) is installed.
+    """
+    names: set = set()
     try:
         from trainbase.torch_models import build_torch_registry
+        names.update(build_torch_registry())
     except ImportError:
-        return frozenset()
-    return frozenset(build_torch_registry())
+        pass
+    try:
+        from trainbase.torch_pretrained_models import build_pretrained_torch_registry
+        names.update(build_pretrained_torch_registry())
+    except ImportError:
+        pass
+    return frozenset(names)
 
 
 def model_family(name: str) -> str:

@@ -149,3 +149,20 @@ class TestConditionalTorchRegistration:
             assert present == torch_keys
         else:
             assert present == set()
+
+
+class TestConditionalPretrainedTorchRegistration:
+    """cnn_pretrained/vit_pretrained register only when torchvision is importable."""
+
+    def test_pretrained_torch_models_present_iff_torchvision(self):
+        torchvision_installed = True
+        try:
+            import torchvision  # noqa: F401
+        except ImportError:
+            torchvision_installed = False
+        pretrained_keys = {"cnn_pretrained", "vit_pretrained"}
+        present = pretrained_keys & set(MODEL_REGISTRY)
+        if torchvision_installed:
+            assert present == pretrained_keys
+        else:
+            assert present == set()

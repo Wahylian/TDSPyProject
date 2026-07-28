@@ -114,3 +114,13 @@ try:
     MODEL_REGISTRY.update(build_torch_registry())
 except ImportError:  # pragma: no cover - exercised only when torch is absent
     pass
+
+
+# Pretrained-backbone deep models register only when torchvision is also
+# importable; --model cnn_pretrained/vit_pretrained then appear automatically.
+try:
+    from .torch_pretrained_models import build_pretrained_torch_registry
+
+    MODEL_REGISTRY.update(build_pretrained_torch_registry())
+except ImportError:  # pragma: no cover - exercised only when torchvision is absent
+    pass

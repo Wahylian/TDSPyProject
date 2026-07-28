@@ -18,6 +18,8 @@ PIPELINE_REGISTRY: Dict[str, Callable[[], ImagePipeline]] = {
     # Raw-pixel pipelines (no PCA) for the torch image models (CNN/ViT).
     "pixels": PrebuiltPipelines.pixels_pipeline,        # 64x64 grayscale   -> 4096 flat pixels
     "pixels_hq": PrebuiltPipelines.pixels_hq_pipeline,  # 128x128 grayscale -> 16384 flat pixels
+    # RGB pixels for the pretrained torchvision backbones (cnn_pretrained/vit_pretrained).
+    "pixels_pretrained": PrebuiltPipelines.pixels_pretrained_pipeline,  # 224x224 RGB -> 150528 flat pixels
 }
 
 

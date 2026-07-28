@@ -88,3 +88,15 @@ class TestGrid:
     def test_empty_records_yields_empty_frame(self):
         grid = ComparisonMatrix([]).grid(metric="f1")
         assert grid.empty
+
+    def test_pretrained_torch_model_paired_with_its_pixel_pipeline(self):
+        """cnn_pretrained/vit_pretrained land in the torch block alongside
+        pixels_pretrained, not dropped as a classical/torch family mismatch."""
+        from trainbase import MODEL_REGISTRY
+        if "cnn_pretrained" not in MODEL_REGISTRY:
+            pytest.skip("torchvision not installed")
+
+        records = [_record("cnn_pretrained", "pixels_pretrained", 0.8)]
+        grid = ComparisonMatrix(records).grid(metric="f1")
+
+        assert grid.loc["cnn_pretrained", "pixels_pretrained"] == 0.8

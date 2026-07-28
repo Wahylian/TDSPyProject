@@ -16,6 +16,7 @@ from sklearn.model_selection import GridSearchCV, learning_curve
 from sklearn.pipeline import Pipeline
 
 from .model_registry import RANDOM_STATE
+from .training import n_jobs_for
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +70,7 @@ def _learning_curve(
             scoring=scoring,
             shuffle=True,               # representative subsets, not the sorted prefix
             random_state=RANDOM_STATE,  # made deterministic by the seed
-            n_jobs=-1,
+            n_jobs=n_jobs_for(best_model),
         )
     except Exception as exc:  # best-effort diagnostic; never fail the run
         logger.warning("Learning curve skipped (%s: %s)", type(exc).__name__, exc)
