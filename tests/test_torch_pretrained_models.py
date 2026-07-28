@@ -74,6 +74,50 @@ def test_joblib_roundtrip_predicts_identically(Model, pretrained_pixel_split, tm
     np.testing.assert_array_equal(before, after)
 
 
+@pytest.fixture
+def deterministic_pretrained(monkeypatch):
+    """Stand in for torchvision's pretrained checkpoint download.
+
+    Reseeds before building so a 'weights=...' backbone resolves to the same
+    fixed init on every call, the same way a real checkpoint would -- letting
+    the pretrained=True slim-pickle path be exercised without a network
+    download.
+    """
+    import trainbase.torch_pretrained_models as tpm
+
+    real_vit_b_16 = tpm.vit_b_16
+    real_resnet18 = tpm.resnet18
+
+    def fake_vit_b_16(weights=None):
+        torch.manual_seed(0)
+        return real_vit_b_16(weights=None)
+
+    def fake_resnet18(weights=None):
+        torch.manual_seed(0)
+        return real_resnet18(weights=None)
+
+    monkeypatch.setattr(tpm, "vit_b_16", fake_vit_b_16)
+    monkeypatch.setattr(tpm, "resnet18", fake_resnet18)
+
+
+@pytest.mark.parametrize("Model", MODELS)
+def test_joblib_roundtrip_slim_pickle_predicts_identically(
+    Model, pretrained_pixel_split, tmp_path, deterministic_pretrained
+):
+    """pretrained=True + freeze_backbone=True (the registry default) should
+    pickle down to a slim head-only artifact that still predicts identically
+    after a roundtrip."""
+    import joblib
+    est = Model(epochs=1, pretrained=True, batch_size=4).fit(
+        pretrained_pixel_split.X_train, pretrained_pixel_split.y_train)
+    before = est.predict(pretrained_pixel_split.X_test)
+    path = tmp_path / "m.joblib"
+    joblib.dump(est, path)
+    assert path.stat().st_size < 200_000  # head + buffers only, not the full backbone
+    after = joblib.load(path).predict(pretrained_pixel_split.X_test)
+    np.testing.assert_array_equal(before, after)
+
+
 @pytest.mark.parametrize("Model", MODELS)
 def test_module_stays_cpu_resident_after_predict(Model, pretrained_pixel_split):
     """Inference may use the GPU internally but leaves module_ CPU-resident

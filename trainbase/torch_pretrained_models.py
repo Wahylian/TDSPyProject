@@ -69,6 +69,38 @@ class _PretrainedImageClassifier(_TorchImageClassifier):
         self.pretrained = pretrained
         self.freeze_backbone = freeze_backbone
 
+    def __getstate__(self) -> dict:
+        """Drop the frozen backbone from the pickle when it's exactly reconstructible.
+
+        With freeze_backbone=True the optimizer skips every backbone parameter
+        (requires_grad=False), so those weights never move from the torchvision
+        checkpoint _build_module loads on rebuild; only the trainable head's
+        parameters -- and any buffers, e.g. BatchNorm running stats, which drift
+        during training regardless of requires_grad -- need to survive the
+        pickle. This shrinks a ~330MB ViT-B/16 (or ~45MB ResNet18) artifact to a
+        few tens of KB. Skipped when pretrained=False, since a random-init
+        backbone isn't reconstructible without replaying the exact training-time
+        RNG state.
+        """
+        state = self.__dict__.copy()
+        module = state.get("module_")
+        if module is not None and self.pretrained and self.freeze_backbone:
+            state["module_"] = None
+            state["_slim_module_state"] = {
+                **{n: p.detach().cpu() for n, p in module.named_parameters() if p.requires_grad},
+                **{n: b.detach().cpu() for n, b in module.named_buffers()},
+            }
+        return state
+
+    def __setstate__(self, state: dict) -> None:
+        slim_module_state = state.pop("_slim_module_state", None)
+        self.__dict__.update(state)
+        if slim_module_state is not None:
+            module = self._build_module(self.image_shape_, len(self.classes_))
+            module.load_state_dict(slim_module_state, strict=False)
+            module.eval()
+            self.module_ = module
+
 
 class CNNPretrainedClassifier(_PretrainedImageClassifier):
     """ResNet18 pretrained on ImageNet, with its head fine-tuned here."""
