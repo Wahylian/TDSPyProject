@@ -1,43 +1,33 @@
-# Core runtime dependencies for the training and preprocessing pipeline.
-numpy
-pandas
-opencv-python
-Pillow
-scikit-learn
-joblib
+# Default install: core deps + the GPU (CUDA) build of torch/torchvision.
+#   pip install -r requirements.txt
+#
+# If the cu126 wheels below aren't available for your platform (no matching
+# NVIDIA/CUDA build, e.g. macOS, or pip reports "No matching distribution"),
+# this file will fail outright -- pip has no built-in "try GPU, fall back to
+# CPU" logic. Either:
+#   pip install -r requirements-cpu.txt      # install the CPU build directly, or
+#   python install.py                        # try GPU, auto-fall back to CPU on failure
 
-# pip install command for core dependencies:
-pip install numpy pandas opencv-python Pillow scikit-learn joblib
+-r requirements-base.txt
 
-# Optional: VGG16 feature embeddings (preprocessing/vectorize.py). Only needed
-# if you use an embedding-based pipeline. Keras runs on the torch backend
-# (KERAS_BACKEND=torch is set in preprocessing/__init__.py); tensorflow is not
-# used, so this works natively on Windows with the +cu126 torch below.
-# keras
-
-# pip install command required for VGG16 embeddings
-pip install keras
-
-# CNN / ViT deep models (trainbase/torch_models.py). GPU (CUDA) build: cu126 is
-# the industry-standard CUDA 12.6 toolkit (<= 13.2) and ships torch 2.13.0. The
-# extra index hosts the +cu126 wheels; every other package resolves from PyPI.
-# CPU-only box? Use  https://download.pytorch.org/whl/cpu  with  torch==2.13.0+cpu
+# CNN/ViT models (trainbase/torch_models.py) and the pretrained ResNet18/ViT-B/16
+# backbones (trainbase/torch_pretrained_models.py). cu126 = CUDA 12.6 toolkit
+# (works with any driver supporting <= CUDA 13.2); every other package above
+# still resolves from PyPI.
 --extra-index-url https://download.pytorch.org/whl/cu126
 torch==2.13.0+cu126
-# torchvision: pretrained ResNet18/ViT-B/16 backbones (trainbase/torch_pretrained_models.py).
 torchvision==0.28.0+cu126
 
-# pip install command for torch that uses gpu
-pip install torch --index-url https://download.pytorch.org/whl/cu126
+# --- Optional extras (uncomment as needed; not required for the core pipeline) ---
 
-# Optional: dataset download (download_dataset.py).
+# VGG16 feature embeddings (preprocessing/vectorize.py), for the embedding_pca /
+# embedding_jl pipelines only. Keras runs on the torch backend above (no
+# tensorflow needed): pip install keras
+# keras
+
+# Dataset download (download_dataset.py); needs Kaggle credentials configured
+# for kagglehub: pip install kagglehub
 # kagglehub
 
-$ pip install command for kagglehub
-pip install kagglehub
-
-# Development / testing.
+# Running the test suite: pip install pytest
 # pytest
-
-# pip install command for pytest
-pip install pytest

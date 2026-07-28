@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import FrozenSet
 
 from trainbase import PIPELINE_REGISTRY
+from trainbase.model_registry import optional_torch_registries
 
 TORCH = "torch"
 CLASSICAL = "classical"
@@ -17,22 +18,11 @@ CLASSICAL = "classical"
 
 def _torch_model_names() -> FrozenSet[str]:
     """Names trainbase's torch-backed registries contribute to MODEL_REGISTRY:
-    the from-scratch cnn/vit (torch_models) and the pretrained-backbone
-    cnn_pretrained/vit_pretrained (torch_pretrained_models). Each is present
-    only when its own optional dependency (torch, then torchvision) is installed.
+    the from-scratch cnn/vit and the pretrained-backbone cnn_pretrained/
+    vit_pretrained. Each is present only when its own optional dependency
+    (torch, then torchvision) is installed; see optional_torch_registries.
     """
-    names: set = set()
-    try:
-        from trainbase.torch_models import build_torch_registry
-        names.update(build_torch_registry())
-    except ImportError:
-        pass
-    try:
-        from trainbase.torch_pretrained_models import build_pretrained_torch_registry
-        names.update(build_pretrained_torch_registry())
-    except ImportError:
-        pass
-    return frozenset(names)
+    return frozenset(optional_torch_registries())
 
 
 def model_family(name: str) -> str:

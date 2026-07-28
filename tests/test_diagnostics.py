@@ -86,7 +86,12 @@ class TestLearningCurveNJobs:
     contend for one shared GPU (see trainbase.training.n_jobs_for)."""
 
     @pytest.mark.slow
+    @pytest.mark.filterwarnings("ignore::sklearn.exceptions.UndefinedMetricWarning")
     def test_torch_model_learning_curve_runs_sequentially(self, pixel_split, monkeypatch):
+        """UndefinedMetricWarning is expected and filtered here: on this tiny
+        16-sample fixture, some of the 5 train_sizes x 3 cv folds land on a
+        validation split with no positive predictions/labels, and the "f1"
+        scorer (unlike evaluate()'s explicit zero_division=0) warns instead."""
         pytest.importorskip("torch")
         import trainbase.diagnostics as diagnostics_module
 

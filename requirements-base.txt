@@ -1,0 +1,8 @@
+# Core runtime dependencies for the training and preprocessing pipeline.
+# Included by requirements.txt and requirements-cpu.txt; installed either way.
+numpy
+pandas
+opencv-python
+Pillow
+scikit-learn
+joblib

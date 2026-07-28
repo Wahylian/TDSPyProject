@@ -2,8 +2,7 @@
 
 Loads a sample dataset, builds a pipeline, extracts features in batches, and
 optionally trains and evaluates a classifier, so the whole flow can be checked
-by eye. Not a pytest target. PrebuiltPipelines is re-exported here for backward
-compatibility with existing imports.
+by eye. Not a pytest target.
 """
 
 import numpy as np
@@ -13,9 +12,6 @@ from preprocessing import (
     ImagePipeline,
     batch_process,
 )
-
-# Re-exported so existing `from integration_example import PrebuiltPipelines` works.
-from prebuilt_pipelines import PrebuiltPipelines
 
 # sklearn is optional and only the training helpers need it; a missing install
 # must not break importing the pipelines/loaders above. Tests guard with importorskip.

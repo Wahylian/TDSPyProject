@@ -1,0 +1,10 @@
+# CPU-only install: core deps + the CPU build of torch/torchvision.
+#   pip install -r requirements-cpu.txt
+# Use this directly on a machine with no NVIDIA/CUDA GPU, or when the cu126
+# wheels in requirements.txt aren't available for your platform.
+
+-r requirements-base.txt
+
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.13.0+cpu
+torchvision==0.28.0+cpu

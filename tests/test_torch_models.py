@@ -148,8 +148,14 @@ def test_module_stays_cpu_resident_after_predict(Model, pixel_split):
 
 
 @pytest.mark.parametrize("Model", MODELS)
+@pytest.mark.filterwarnings("ignore:No CUDA GPU available:UserWarning")
 def test_predict_does_not_warn_about_missing_gpu(Model, pixel_split, monkeypatch):
-    """Unlike fit(), predict() doesn't re-warn about a missing GPU on every call."""
+    """Unlike fit(), predict() doesn't re-warn about a missing GPU on every call.
+
+    fit() itself is expected to warn here (device=None, GPU forced absent via
+    monkeypatch) -- that's the known, deliberate warning this test filters out;
+    only predict() is asserted warning-free, inside simplefilter("error") below.
+    """
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
     est = Model(epochs=1).fit(pixel_split.X_train, pixel_split.y_train)
     with warnings.catch_warnings():

@@ -106,21 +106,32 @@ MODEL_REGISTRY: Dict[str, ModelSpec] = {
 }
 
 
-# Deep models register only when torch is importable, so the project runs
-# without the optional dependency; --model cnn/vit then appear automatically.
-try:
-    from .torch_models import build_torch_registry
+def optional_torch_registries() -> Dict[str, ModelSpec]:
+    """Merge the torch-backed registries, skipping any whose optional
+    dependency is missing: the from-scratch cnn/vit (needs torch) and the
+    pretrained-backbone cnn_pretrained/vit_pretrained (needs torchvision too).
 
-    MODEL_REGISTRY.update(build_torch_registry())
-except ImportError:  # pragma: no cover - exercised only when torch is absent
-    pass
+    Shared by the MODEL_REGISTRY registration below and
+    comparison.registry_utils, so both agree on which names are torch-backed
+    without hardcoding a name list.
+    """
+    specs: Dict[str, ModelSpec] = {}
+    try:
+        from .torch_models import build_torch_registry
+
+        specs.update(build_torch_registry())
+    except ImportError:  # pragma: no cover - exercised only when torch is absent
+        pass
+    try:
+        from .torch_pretrained_models import build_pretrained_torch_registry
+
+        specs.update(build_pretrained_torch_registry())
+    except ImportError:  # pragma: no cover - exercised only when torchvision is absent
+        pass
+    return specs
 
 
-# Pretrained-backbone deep models register only when torchvision is also
-# importable; --model cnn_pretrained/vit_pretrained then appear automatically.
-try:
-    from .torch_pretrained_models import build_pretrained_torch_registry
-
-    MODEL_REGISTRY.update(build_pretrained_torch_registry())
-except ImportError:  # pragma: no cover - exercised only when torchvision is absent
-    pass
+# Deep models register only when torch/torchvision are importable, so the
+# project runs without those optional dependencies; --model cnn/vit/
+# cnn_pretrained/vit_pretrained then appear automatically.
+MODEL_REGISTRY.update(optional_torch_registries())
