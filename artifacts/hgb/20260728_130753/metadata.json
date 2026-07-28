@@ -1,0 +1,138 @@
+{
+  "model_name": "hgb",
+  "run_id": "20260728_130753",
+  "timestamp": "2026-07-28T13:07:53",
+  "pipeline_used": "embedding_pca",
+  "pipeline_spec": null,
+  "pipeline_steps": [
+    [
+      "grayscale",
+      {}
+    ],
+    [
+      "resize",
+      {
+        "target_size": [
+          224,
+          224
+        ],
+        "preserve_aspect": true
+      }
+    ],
+    [
+      "vectorize",
+      {
+        "method": "vgg16"
+      }
+    ],
+    [
+      "reduce",
+      {
+        "method": "vec-pca",
+        "n_components": 150,
+        "random_state": 42
+      }
+    ],
+    [
+      "scale",
+      {}
+    ]
+  ],
+  "scoring": "f1",
+  "sample_sizes": {
+    "train": 5000,
+    "val": 2000,
+    "test": 5000
+  },
+  "hyperparameters": {
+    "clf__learning_rate": 0.1,
+    "clf__max_iter": 200
+  },
+  "best_val_score": 0.7861926841834106,
+  "evaluation_metrics": {
+    "accuracy": 0.7926,
+    "precision": 0.7561076604554865,
+    "recall": 0.802990325417766,
+    "pr_auc": 0.8495861037366118,
+    "roc_auc": 0.8783180758467114
+  },
+  "baseline_metrics": {
+    "accuracy": 0.5452,
+    "precision": 0.0,
+    "recall": 0.0,
+    "pr_auc": 0.4548,
+    "roc_auc": 0.5
+  },
+  "diagnostics": {
+    "confusion_matrix": [
+      [
+        2137,
+        589
+      ],
+      [
+        448,
+        1826
+      ]
+    ],
+    "classification_report": "              precision    recall  f1-score   support\n\n        real       0.83      0.78      0.80      2726\n        fake       0.76      0.80      0.78      2274\n\n    accuracy                           0.79      5000\n   macro avg       0.79      0.79      0.79      5000\nweighted avg       0.79      0.79      0.79      5000\n",
+    "feature_importances": null,
+    "oob_score": null,
+    "hyperparameter_scores": [
+      {
+        "params": {
+          "clf__learning_rate": 0.05,
+          "clf__max_iter": 100
+        },
+        "mean_val_score": 0.7698744769874477,
+        "std_val_score": 0.0
+      },
+      {
+        "params": {
+          "clf__learning_rate": 0.05,
+          "clf__max_iter": 200
+        },
+        "mean_val_score": 0.7722048066875653,
+        "std_val_score": 0.0
+      },
+      {
+        "params": {
+          "clf__learning_rate": 0.1,
+          "clf__max_iter": 100
+        },
+        "mean_val_score": 0.778238341968912,
+        "std_val_score": 0.0
+      },
+      {
+        "params": {
+          "clf__learning_rate": 0.1,
+          "clf__max_iter": 200
+        },
+        "mean_val_score": 0.7861926841834106,
+        "std_val_score": 0.0
+      }
+    ],
+    "learning_curve": {
+      "train_sizes": [
+        666,
+        1333,
+        1999,
+        2666,
+        3333
+      ],
+      "train_scores_mean": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "val_scores_mean": [
+        0.6931125531027176,
+        0.7362792197814638,
+        0.7458293147226654,
+        0.7573570488015914,
+        0.7570458741655474
+      ]
+    }
+  }
+}

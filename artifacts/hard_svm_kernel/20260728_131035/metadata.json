@@ -1,0 +1,119 @@
+{
+  "model_name": "hard_svm_kernel",
+  "run_id": "20260728_131035",
+  "timestamp": "2026-07-28T13:10:35",
+  "pipeline_used": "embedding_pca",
+  "pipeline_spec": null,
+  "pipeline_steps": [
+    [
+      "grayscale",
+      {}
+    ],
+    [
+      "resize",
+      {
+        "target_size": [
+          224,
+          224
+        ],
+        "preserve_aspect": true
+      }
+    ],
+    [
+      "vectorize",
+      {
+        "method": "vgg16"
+      }
+    ],
+    [
+      "reduce",
+      {
+        "method": "vec-pca",
+        "n_components": 150,
+        "random_state": 42
+      }
+    ],
+    [
+      "scale",
+      {}
+    ]
+  ],
+  "scoring": "f1",
+  "sample_sizes": {
+    "train": 5000,
+    "val": 2000,
+    "test": 5000
+  },
+  "hyperparameters": {
+    "clf__C": 10000.0
+  },
+  "best_val_score": 0.6755292959133432,
+  "evaluation_metrics": {
+    "accuracy": 0.6496,
+    "precision": 0.5970260223048327,
+    "recall": 0.7062445030782761,
+    "pr_auc": 0.6669594817805479,
+    "roc_auc": 0.7144512499266001
+  },
+  "baseline_metrics": {
+    "accuracy": 0.5452,
+    "precision": 0.0,
+    "recall": 0.0,
+    "pr_auc": 0.4548,
+    "roc_auc": 0.5
+  },
+  "diagnostics": {
+    "confusion_matrix": [
+      [
+        1642,
+        1084
+      ],
+      [
+        668,
+        1606
+      ]
+    ],
+    "classification_report": "              precision    recall  f1-score   support\n\n        real       0.71      0.60      0.65      2726\n        fake       0.60      0.71      0.65      2274\n\n    accuracy                           0.65      5000\n   macro avg       0.65      0.65      0.65      5000\nweighted avg       0.66      0.65      0.65      5000\n",
+    "feature_importances": null,
+    "oob_score": null,
+    "hyperparameter_scores": [
+      {
+        "params": {
+          "clf__C": 10000.0
+        },
+        "mean_val_score": 0.6755292959133432,
+        "std_val_score": 0.0
+      },
+      {
+        "params": {
+          "clf__C": 1000000.0
+        },
+        "mean_val_score": 0.6755292959133432,
+        "std_val_score": 0.0
+      }
+    ],
+    "learning_curve": {
+      "train_sizes": [
+        666,
+        1333,
+        1999,
+        2666,
+        3333
+      ],
+      "train_scores_mean": [
+        0.7137949043740618,
+        0.6588247420247741,
+        0.6468555501482309,
+        0.6485927529317649,
+        0.6323466608585816
+      ],
+      "val_scores_mean": [
+        0.6592564556113909,
+        0.6282619373045027,
+        0.6287302069774708,
+        0.6379873041436702,
+        0.6366164323291033
+      ]
+    }
+  }
+}
