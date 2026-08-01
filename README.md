@@ -181,18 +181,80 @@ Inference from a raw image reuses both artifacts:
 
 `python -m comparison` reads every `artifacts/**/metadata.json` and writes
 Markdown/HTML/CSV reports (plus optional PNG plots) to a timestamped directory
-under `Docs/reports/`:
+under `Docs/reports/`. It never touches training code, so it is safe to re-run
+at any time. Three evaluation shapes, one subcommand each:
+
+| Shape | Subcommand | Question it answers |
+|---|---|---|
+| N×1 | `leaderboard` | Which model wins on a fixed front-end? |
+| 1×N | `resilience` | How sensitive is one model to its front-end? |
+| N×M | `grid` | Which model/pipeline *combination* wins? |
+
+**Leaderboards (N×1).** With `--pipeline`, every model is scored on an identical
+feature space; without it, each model is represented by its own best run across
+whichever pipelines it has.
 
 ```bash
-# Rank every model on one pipeline:
+# Rank every model on one pipeline (like-for-like):
 python -m comparison leaderboard --pipeline svm --diagnostics --plot
 
-# How resilient is one model across the pipelines it's been run on:
-python -m comparison resilience --model svm
+# Same ranking on the other classical front-ends:
+python -m comparison leaderboard --pipeline hq
+python -m comparison leaderboard --pipeline embedding_pca
+python -m comparison leaderboard --pipeline svm_jl
 
-# Full model x pipeline grid (classical and torch families kept separate):
-python -m comparison grid
+# Best-of-all-pipelines per model (no --pipeline), ranked by a different metric:
+python -m comparison leaderboard
+python -m comparison leaderboard --metric roc_auc
+python -m comparison leaderboard --metric recall --plot
+
+# The torch block: each deep model has exactly one legal pipeline.
+python -m comparison leaderboard --pipeline pixels
+python -m comparison leaderboard --pipeline pixels_hq
+python -m comparison leaderboard --pipeline pixels_pretrained
 ```
+
+**Resilience sweeps (1×N).** Every classical model has been run on all seven
+classical pipelines, so this isolates how much of a score is the classifier
+versus the front-end:
+
+```bash
+python -m comparison resilience --model svm
+python -m comparison resilience --model rf
+python -m comparison resilience --model hgb --metric pr_auc
+python -m comparison resilience --model mlp --diagnostics --plot
+
+# Hard-margin pair, to check they degrade the same way:
+python -m comparison resilience --model hard_svm
+python -m comparison resilience --model hard_svm_kernel
+```
+
+**Full grid (N×M).** Classical models pivot only against classical pipelines and
+torch models only against raw-pixel pipelines — the two blocks never cross, and
+uncovered combinations show as `NaN`:
+
+```bash
+python -m comparison grid
+python -m comparison grid --metric roc_auc
+python -m comparison grid --metric accuracy --plot
+
+# Scan an alternate artifacts root and write elsewhere:
+python -m comparison grid --root artifacts --output-dir Docs/reports/full_matrix
+```
+
+**Flags** (shared by all three shapes):
+
+| Flag | Default | Effect |
+|---|---|---|
+| `--root` | `artifacts` | Artifacts root to scan. |
+| `--metric` | `f1` | Ranks/pivots on `accuracy`, `precision`, `recall`, `f1`, `pr_auc`, or `roc_auc`. |
+| `--output-dir` | `Docs/reports` | Reports land in `<output-dir>/<timestamp>/`. |
+| `--diagnostics` | off | Adds confusion matrix, hyperparameter scores, importances/OOB, and learning curve per run shown. |
+| `--plot` | off | Saves PNG plots when `matplotlib` is installed; skipped silently otherwise. |
+
+Two caveats: `--diagnostics` is accepted but ignored for `grid` (a cell has no
+single `run_id` to attribute diagnostics to), and a `resilience` sweep of a torch
+model returns a single row, since each deep tier has exactly one legal pipeline.
 
 ## 5. Running Tests
 
