@@ -18,6 +18,7 @@ from .model_registry import (
     MODEL_REGISTRY,
 )
 from .pipeline_registry import PIPELINE_REGISTRY
+from .prebuilt_pipelines import PrebuiltPipelines
 from .features import (
     build_feature_pipeline,
     load_images,
@@ -42,6 +43,7 @@ __all__ = [
     "ModelSpec",
     "MODEL_REGISTRY",
     "PIPELINE_REGISTRY",
+    "PrebuiltPipelines",
     # feature front-end
     "build_feature_pipeline",
     "load_images",

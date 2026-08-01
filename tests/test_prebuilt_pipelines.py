@@ -1,4 +1,4 @@
-"""Tests for the ready-made pipeline factories in prebuilt_pipelines.py.
+"""Tests for the ready-made pipeline factories in trainbase/prebuilt_pipelines.py.
 
 Pins that every factory returns a valid, independent ImagePipeline, that each
 named pipeline's stages match its documented intent, and that the reduce
@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 
 from preprocessing import ImagePipeline, batch_process
-from prebuilt_pipelines import PrebuiltPipelines
+from trainbase import PrebuiltPipelines
 
 
 # Every zero-argument factory on PrebuiltPipelines, named for parametrize ids.
@@ -150,7 +150,6 @@ class TestPixelPipelines:
     """No-PCA pixel pipelines that feed the raw-image torch models."""
 
     def test_pixels_pipeline_emits_flat_4096_no_reduce(self, image_batch):
-        from prebuilt_pipelines import PrebuiltPipelines
         pipe = PrebuiltPipelines.pixels_pipeline()
         X = pipe.fit_transform(image_batch)
         assert X.ndim == 2 and X.shape[1] == 64 * 64
@@ -159,7 +158,6 @@ class TestPixelPipelines:
         assert "reduce" not in ops and "scale" not in ops
 
     def test_pixels_hq_pipeline_emits_flat_16384(self, image_batch):
-        from prebuilt_pipelines import PrebuiltPipelines
         pipe = PrebuiltPipelines.pixels_hq_pipeline()
         X = pipe.fit_transform(image_batch)
         assert X.ndim == 2 and X.shape[1] == 128 * 128
@@ -171,7 +169,6 @@ class TestPixelPipelines:
 
     def test_pixels_pretrained_pipeline_emits_flat_rgb_224(self, image_batch):
         """224x224 RGB, channel-major, no grayscale/reduce/scale step."""
-        from prebuilt_pipelines import PrebuiltPipelines
         pipe = PrebuiltPipelines.pixels_pretrained_pipeline()
         X = pipe.fit_transform(image_batch)
         assert X.ndim == 2 and X.shape[1] == 3 * 224 * 224

@@ -12,7 +12,7 @@ import inspect
 import pytest
 
 from preprocessing import ImagePipeline
-from prebuilt_pipelines import PrebuiltPipelines
+from trainbase import PrebuiltPipelines
 from trainbase.pipeline_registry import PIPELINE_REGISTRY
 
 # Genuine factories on PrebuiltPipelines, found by introspection so adding one

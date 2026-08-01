@@ -3,7 +3,7 @@
 
 from typing import Callable, Dict, List, Optional, Tuple
 
-from prebuilt_pipelines import PrebuiltPipelines
+from .prebuilt_pipelines import PrebuiltPipelines
 from preprocessing import ImagePipeline
 
 # CLI name to a PrebuiltPipelines factory. Each returns a self-contained pipeline

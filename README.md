@@ -45,6 +45,8 @@ preprocessing/           -> image -> vector building blocks (the public API)
 trainbase/               -> training backend used by train_model.py
   model_registry.py      -> MODEL_REGISTRY: classical, kernel, and (optional) deep models
   pipeline_registry.py   -> PIPELINE_REGISTRY: prebuilt feature pipelines
+  prebuilt_pipelines.py  -> PrebuiltPipelines: named factories backing PIPELINE_REGISTRY
+                             (import via `from trainbase import PrebuiltPipelines`)
   torch_models.py        -> CNNClassifier / ViTClassifier, trained from scratch (needs torch)
   torch_pretrained_models.py -> frozen-backbone ResNet18 / ViT-B/16 (needs torchvision)
   features.py            -> build/fit/transform features, with an on-disk feature cache
