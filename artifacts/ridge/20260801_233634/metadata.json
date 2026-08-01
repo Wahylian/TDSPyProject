@@ -1,0 +1,121 @@
+{
+  "model_name": "ridge",
+  "run_id": "20260801_233634",
+  "timestamp": "2026-08-01T23:36:34",
+  "pipeline_used": "svm_jl",
+  "pipeline_spec": null,
+  "pipeline_steps": [
+    [
+      "grayscale",
+      {}
+    ],
+    [
+      "resize",
+      {
+        "target_size": [
+          128,
+          128
+        ],
+        "preserve_aspect": true
+      }
+    ],
+    [
+      "denoise",
+      {
+        "method": "bilateral",
+        "kernel_size": 5
+      }
+    ],
+    [
+      "normalize",
+      {
+        "method": "minmax",
+        "value_range": [
+          0.0,
+          1.0
+        ]
+      }
+    ],
+    [
+      "vectorize",
+      {
+        "preserve_structure": false
+      }
+    ],
+    [
+      "reduce",
+      {
+        "method": "vec-jl",
+        "n_components": 150,
+        "random_state": 42
+      }
+    ],
+    [
+      "scale",
+      {}
+    ]
+  ],
+  "scoring": "f1",
+  "sample_sizes": {
+    "train": 5000,
+    "val": 2000,
+    "test": 5000
+  },
+  "hyperparameters": {
+    "clf__alpha": 1.0
+  },
+  "best_val_score": 0.6801490154337414,
+  "evaluation_metrics": {
+    "accuracy": 0.6918,
+    "precision": 0.6623836951705804,
+    "recall": 0.6574318381706244,
+    "pr_auc": 0.7105826618590547,
+    "roc_auc": 0.7649900208487795
+  },
+  "baseline_metrics": {
+    "accuracy": 0.5452,
+    "precision": 0.0,
+    "recall": 0.0,
+    "pr_auc": 0.4548,
+    "roc_auc": 0.5
+  },
+  "diagnostics": {
+    "confusion_matrix": [
+      [
+        1964,
+        762
+      ],
+      [
+        779,
+        1495
+      ]
+    ],
+    "classification_report": "              precision    recall  f1-score   support\n\n        real       0.72      0.72      0.72      2726\n        fake       0.66      0.66      0.66      2274\n\n    accuracy                           0.69      5000\n   macro avg       0.69      0.69      0.69      5000\nweighted avg       0.69      0.69      0.69      5000\n",
+    "feature_importances": null,
+    "oob_score": null,
+    "hyperparameter_scores": [
+      {
+        "params": {
+          "clf__alpha": 0.1
+        },
+        "mean_val_score": 0.6794462193823216,
+        "std_val_score": 0.0
+      },
+      {
+        "params": {
+          "clf__alpha": 1.0
+        },
+        "mean_val_score": 0.6801490154337414,
+        "std_val_score": 0.0
+      },
+      {
+        "params": {
+          "clf__alpha": 10.0
+        },
+        "mean_val_score": 0.6791044776119403,
+        "std_val_score": 0.0
+      }
+    ],
+    "learning_curve": null
+  }
+}

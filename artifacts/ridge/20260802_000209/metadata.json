@@ -1,0 +1,104 @@
+{
+  "model_name": "ridge",
+  "run_id": "20260802_000209",
+  "timestamp": "2026-08-02T00:02:09",
+  "pipeline_used": "embedding_jl",
+  "pipeline_spec": null,
+  "pipeline_steps": [
+    [
+      "grayscale",
+      {}
+    ],
+    [
+      "resize",
+      {
+        "target_size": [
+          224,
+          224
+        ],
+        "preserve_aspect": true
+      }
+    ],
+    [
+      "vectorize",
+      {
+        "method": "vgg16"
+      }
+    ],
+    [
+      "reduce",
+      {
+        "method": "vec-jl",
+        "n_components": 150,
+        "random_state": 42
+      }
+    ],
+    [
+      "scale",
+      {}
+    ]
+  ],
+  "scoring": "f1",
+  "sample_sizes": {
+    "train": 5000,
+    "val": 2000,
+    "test": 5000
+  },
+  "hyperparameters": {
+    "clf__alpha": 0.1
+  },
+  "best_val_score": 0.715625,
+  "evaluation_metrics": {
+    "accuracy": 0.7292,
+    "precision": 0.6850362027353177,
+    "recall": 0.748900615655233,
+    "pr_auc": 0.7480694032017551,
+    "roc_auc": 0.8025416185131484
+  },
+  "baseline_metrics": {
+    "accuracy": 0.5452,
+    "precision": 0.0,
+    "recall": 0.0,
+    "pr_auc": 0.4548,
+    "roc_auc": 0.5
+  },
+  "diagnostics": {
+    "confusion_matrix": [
+      [
+        1943,
+        783
+      ],
+      [
+        571,
+        1703
+      ]
+    ],
+    "classification_report": "              precision    recall  f1-score   support\n\n        real       0.77      0.71      0.74      2726\n        fake       0.69      0.75      0.72      2274\n\n    accuracy                           0.73      5000\n   macro avg       0.73      0.73      0.73      5000\nweighted avg       0.73      0.73      0.73      5000\n",
+    "feature_importances": null,
+    "oob_score": null,
+    "hyperparameter_scores": [
+      {
+        "params": {
+          "clf__alpha": 0.1
+        },
+        "mean_val_score": 0.715625,
+        "std_val_score": 0.0
+      },
+      {
+        "params": {
+          "clf__alpha": 1.0
+        },
+        "mean_val_score": 0.715625,
+        "std_val_score": 0.0
+      },
+      {
+        "params": {
+          "clf__alpha": 10.0
+        },
+        "mean_val_score": 0.7149557060969255,
+        "std_val_score": 0.0
+      }
+    ],
+    "learning_curve": null
+  }
+}

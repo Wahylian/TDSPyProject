@@ -1,0 +1,157 @@
+{
+  "model_name": "mlp",
+  "run_id": "20260801_233756",
+  "timestamp": "2026-08-01T23:37:56",
+  "pipeline_used": "svm_jl",
+  "pipeline_spec": null,
+  "pipeline_steps": [
+    [
+      "grayscale",
+      {}
+    ],
+    [
+      "resize",
+      {
+        "target_size": [
+          128,
+          128
+        ],
+        "preserve_aspect": true
+      }
+    ],
+    [
+      "denoise",
+      {
+        "method": "bilateral",
+        "kernel_size": 5
+      }
+    ],
+    [
+      "normalize",
+      {
+        "method": "minmax",
+        "value_range": [
+          0.0,
+          1.0
+        ]
+      }
+    ],
+    [
+      "vectorize",
+      {
+        "preserve_structure": false
+      }
+    ],
+    [
+      "reduce",
+      {
+        "method": "vec-jl",
+        "n_components": 150,
+        "random_state": 42
+      }
+    ],
+    [
+      "scale",
+      {}
+    ]
+  ],
+  "scoring": "f1",
+  "sample_sizes": {
+    "train": 5000,
+    "val": 2000,
+    "test": 5000
+  },
+  "hyperparameters": {
+    "clf__alpha": 0.001,
+    "clf__hidden_layer_sizes": [
+      100
+    ]
+  },
+  "best_val_score": 0.6829268292682927,
+  "evaluation_metrics": {
+    "accuracy": 0.7082,
+    "precision": 0.6758739749676306,
+    "recall": 0.6886543535620053,
+    "pr_auc": 0.7287552232253343,
+    "roc_auc": 0.7857160371703218
+  },
+  "baseline_metrics": {
+    "accuracy": 0.5452,
+    "precision": 0.0,
+    "recall": 0.0,
+    "pr_auc": 0.4548,
+    "roc_auc": 0.5
+  },
+  "diagnostics": {
+    "confusion_matrix": [
+      [
+        1975,
+        751
+      ],
+      [
+        708,
+        1566
+      ]
+    ],
+    "classification_report": "              precision    recall  f1-score   support\n\n        real       0.74      0.72      0.73      2726\n        fake       0.68      0.69      0.68      2274\n\n    accuracy                           0.71      5000\n   macro avg       0.71      0.71      0.71      5000\nweighted avg       0.71      0.71      0.71      5000\n",
+    "feature_importances": null,
+    "oob_score": null,
+    "hyperparameter_scores": [
+      {
+        "params": {
+          "clf__alpha": 0.0001,
+          "clf__hidden_layer_sizes": "(100,)"
+        },
+        "mean_val_score": 0.6723768736616702,
+        "std_val_score": 0.0
+      },
+      {
+        "params": {
+          "clf__alpha": 0.0001,
+          "clf__hidden_layer_sizes": "(64, 32)"
+        },
+        "mean_val_score": 0.6634920634920635,
+        "std_val_score": 0.0
+      },
+      {
+        "params": {
+          "clf__alpha": 0.001,
+          "clf__hidden_layer_sizes": "(100,)"
+        },
+        "mean_val_score": 0.6829268292682927,
+        "std_val_score": 0.0
+      },
+      {
+        "params": {
+          "clf__alpha": 0.001,
+          "clf__hidden_layer_sizes": "(64, 32)"
+        },
+        "mean_val_score": 0.6620395088093967,
+        "std_val_score": 0.0
+      }
+    ],
+    "learning_curve": {
+      "train_sizes": [
+        666,
+        1333,
+        1999,
+        2666,
+        3333
+      ],
+      "train_scores_mean": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "val_scores_mean": [
+        0.637763406957911,
+        0.6579127166940656,
+        0.6632229232164314,
+        0.6771674337625623,
+        0.6765757344798725
+      ]
+    }
+  }
+}

@@ -1,0 +1,116 @@
+{
+  "model_name": "hgb",
+  "run_id": "20260802_000302",
+  "timestamp": "2026-08-02T00:03:02",
+  "pipeline_used": "embedding_jl",
+  "pipeline_spec": null,
+  "pipeline_steps": [
+    [
+      "grayscale",
+      {}
+    ],
+    [
+      "resize",
+      {
+        "target_size": [
+          224,
+          224
+        ],
+        "preserve_aspect": true
+      }
+    ],
+    [
+      "vectorize",
+      {
+        "method": "vgg16"
+      }
+    ],
+    [
+      "reduce",
+      {
+        "method": "vec-jl",
+        "n_components": 150,
+        "random_state": 42
+      }
+    ],
+    [
+      "scale",
+      {}
+    ]
+  ],
+  "scoring": "f1",
+  "sample_sizes": {
+    "train": 5000,
+    "val": 2000,
+    "test": 5000
+  },
+  "hyperparameters": {
+    "clf__learning_rate": 0.05,
+    "clf__max_iter": 200
+  },
+  "best_val_score": 0.717391304347826,
+  "evaluation_metrics": {
+    "accuracy": 0.7352,
+    "precision": 0.7105496453900709,
+    "recall": 0.7049252418645559,
+    "pr_auc": 0.774857445957044,
+    "roc_auc": 0.8176861016524803
+  },
+  "baseline_metrics": {
+    "accuracy": 0.5452,
+    "precision": 0.0,
+    "recall": 0.0,
+    "pr_auc": 0.4548,
+    "roc_auc": 0.5
+  },
+  "diagnostics": {
+    "confusion_matrix": [
+      [
+        2073,
+        653
+      ],
+      [
+        671,
+        1603
+      ]
+    ],
+    "classification_report": "              precision    recall  f1-score   support\n\n        real       0.76      0.76      0.76      2726\n        fake       0.71      0.70      0.71      2274\n\n    accuracy                           0.74      5000\n   macro avg       0.73      0.73      0.73      5000\nweighted avg       0.74      0.74      0.74      5000\n",
+    "feature_importances": null,
+    "oob_score": null,
+    "hyperparameter_scores": [
+      {
+        "params": {
+          "clf__learning_rate": 0.05,
+          "clf__max_iter": 100
+        },
+        "mean_val_score": 0.7104972375690608,
+        "std_val_score": 0.0
+      },
+      {
+        "params": {
+          "clf__learning_rate": 0.05,
+          "clf__max_iter": 200
+        },
+        "mean_val_score": 0.717391304347826,
+        "std_val_score": 0.0
+      },
+      {
+        "params": {
+          "clf__learning_rate": 0.1,
+          "clf__max_iter": 100
+        },
+        "mean_val_score": 0.7037643207855974,
+        "std_val_score": 0.0
+      },
+      {
+        "params": {
+          "clf__learning_rate": 0.1,
+          "clf__max_iter": 200
+        },
+        "mean_val_score": 0.7103825136612022,
+        "std_val_score": 0.0
+      }
+    ],
+    "learning_curve": null
+  }
+}

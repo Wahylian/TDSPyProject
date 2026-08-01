@@ -1,0 +1,133 @@
+{
+  "model_name": "hgb",
+  "run_id": "20260801_233730",
+  "timestamp": "2026-08-01T23:37:30",
+  "pipeline_used": "svm_jl",
+  "pipeline_spec": null,
+  "pipeline_steps": [
+    [
+      "grayscale",
+      {}
+    ],
+    [
+      "resize",
+      {
+        "target_size": [
+          128,
+          128
+        ],
+        "preserve_aspect": true
+      }
+    ],
+    [
+      "denoise",
+      {
+        "method": "bilateral",
+        "kernel_size": 5
+      }
+    ],
+    [
+      "normalize",
+      {
+        "method": "minmax",
+        "value_range": [
+          0.0,
+          1.0
+        ]
+      }
+    ],
+    [
+      "vectorize",
+      {
+        "preserve_structure": false
+      }
+    ],
+    [
+      "reduce",
+      {
+        "method": "vec-jl",
+        "n_components": 150,
+        "random_state": 42
+      }
+    ],
+    [
+      "scale",
+      {}
+    ]
+  ],
+  "scoring": "f1",
+  "sample_sizes": {
+    "train": 5000,
+    "val": 2000,
+    "test": 5000
+  },
+  "hyperparameters": {
+    "clf__learning_rate": 0.05,
+    "clf__max_iter": 200
+  },
+  "best_val_score": 0.6799784133837021,
+  "evaluation_metrics": {
+    "accuracy": 0.7042,
+    "precision": 0.6812585499316005,
+    "recall": 0.6569920844327177,
+    "pr_auc": 0.7261279198229824,
+    "roc_auc": 0.7773399060869275
+  },
+  "baseline_metrics": {
+    "accuracy": 0.5452,
+    "precision": 0.0,
+    "recall": 0.0,
+    "pr_auc": 0.4548,
+    "roc_auc": 0.5
+  },
+  "diagnostics": {
+    "confusion_matrix": [
+      [
+        2027,
+        699
+      ],
+      [
+        780,
+        1494
+      ]
+    ],
+    "classification_report": "              precision    recall  f1-score   support\n\n        real       0.72      0.74      0.73      2726\n        fake       0.68      0.66      0.67      2274\n\n    accuracy                           0.70      5000\n   macro avg       0.70      0.70      0.70      5000\nweighted avg       0.70      0.70      0.70      5000\n",
+    "feature_importances": null,
+    "oob_score": null,
+    "hyperparameter_scores": [
+      {
+        "params": {
+          "clf__learning_rate": 0.05,
+          "clf__max_iter": 100
+        },
+        "mean_val_score": 0.6699293094072866,
+        "std_val_score": 0.0
+      },
+      {
+        "params": {
+          "clf__learning_rate": 0.05,
+          "clf__max_iter": 200
+        },
+        "mean_val_score": 0.6799784133837021,
+        "std_val_score": 0.0
+      },
+      {
+        "params": {
+          "clf__learning_rate": 0.1,
+          "clf__max_iter": 100
+        },
+        "mean_val_score": 0.6670276123443422,
+        "std_val_score": 0.0
+      },
+      {
+        "params": {
+          "clf__learning_rate": 0.1,
+          "clf__max_iter": 200
+        },
+        "mean_val_score": 0.6792452830188679,
+        "std_val_score": 0.0
+      }
+    ],
+    "learning_curve": null
+  }
+}

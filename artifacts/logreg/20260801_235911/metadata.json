@@ -1,0 +1,104 @@
+{
+  "model_name": "logreg",
+  "run_id": "20260801_235911",
+  "timestamp": "2026-08-01T23:59:11",
+  "pipeline_used": "embedding_pca",
+  "pipeline_spec": null,
+  "pipeline_steps": [
+    [
+      "grayscale",
+      {}
+    ],
+    [
+      "resize",
+      {
+        "target_size": [
+          224,
+          224
+        ],
+        "preserve_aspect": true
+      }
+    ],
+    [
+      "vectorize",
+      {
+        "method": "vgg16"
+      }
+    ],
+    [
+      "reduce",
+      {
+        "method": "vec-pca",
+        "n_components": 150,
+        "random_state": 42
+      }
+    ],
+    [
+      "scale",
+      {}
+    ]
+  ],
+  "scoring": "f1",
+  "sample_sizes": {
+    "train": 5000,
+    "val": 2000,
+    "test": 5000
+  },
+  "hyperparameters": {
+    "clf__C": 1.0
+  },
+  "best_val_score": 0.7871781397792958,
+  "evaluation_metrics": {
+    "accuracy": 0.788,
+    "precision": 0.7544006705783739,
+    "recall": 0.7915567282321899,
+    "pr_auc": 0.834765183694798,
+    "roc_auc": 0.871003580621411
+  },
+  "baseline_metrics": {
+    "accuracy": 0.5452,
+    "precision": 0.0,
+    "recall": 0.0,
+    "pr_auc": 0.4548,
+    "roc_auc": 0.5
+  },
+  "diagnostics": {
+    "confusion_matrix": [
+      [
+        2140,
+        586
+      ],
+      [
+        474,
+        1800
+      ]
+    ],
+    "classification_report": "              precision    recall  f1-score   support\n\n        real       0.82      0.79      0.80      2726\n        fake       0.75      0.79      0.77      2274\n\n    accuracy                           0.79      5000\n   macro avg       0.79      0.79      0.79      5000\nweighted avg       0.79      0.79      0.79      5000\n",
+    "feature_importances": null,
+    "oob_score": null,
+    "hyperparameter_scores": [
+      {
+        "params": {
+          "clf__C": 0.1
+        },
+        "mean_val_score": 0.784623486045287,
+        "std_val_score": 0.0
+      },
+      {
+        "params": {
+          "clf__C": 1.0
+        },
+        "mean_val_score": 0.7871781397792958,
+        "std_val_score": 0.0
+      },
+      {
+        "params": {
+          "clf__C": 10.0
+        },
+        "mean_val_score": 0.7871781397792958,
+        "std_val_score": 0.0
+      }
+    ],
+    "learning_curve": null
+  }
+}

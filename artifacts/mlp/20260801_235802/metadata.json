@@ -1,0 +1,144 @@
+{
+  "model_name": "mlp",
+  "run_id": "20260801_235802",
+  "timestamp": "2026-08-01T23:58:02",
+  "pipeline_used": "no_denoise",
+  "pipeline_spec": null,
+  "pipeline_steps": [
+    [
+      "grayscale",
+      {}
+    ],
+    [
+      "resize",
+      {
+        "target_size": [
+          128,
+          128
+        ],
+        "preserve_aspect": true
+      }
+    ],
+    [
+      "normalize",
+      {
+        "method": "minmax"
+      }
+    ],
+    [
+      "vectorize",
+      {}
+    ],
+    [
+      "reduce",
+      {
+        "method": "vec-pca",
+        "n_components": 150,
+        "random_state": 42
+      }
+    ],
+    [
+      "scale",
+      {}
+    ]
+  ],
+  "scoring": "f1",
+  "sample_sizes": {
+    "train": 5000,
+    "val": 2000,
+    "test": 5000
+  },
+  "hyperparameters": {
+    "clf__alpha": 0.0001,
+    "clf__hidden_layer_sizes": [
+      100
+    ]
+  },
+  "best_val_score": 0.7348008385744235,
+  "evaluation_metrics": {
+    "accuracy": 0.7338,
+    "precision": 0.6998728274692666,
+    "recall": 0.7260334212840809,
+    "pr_auc": 0.7629113244589125,
+    "roc_auc": 0.8087877025109518
+  },
+  "baseline_metrics": {
+    "accuracy": 0.5452,
+    "precision": 0.0,
+    "recall": 0.0,
+    "pr_auc": 0.4548,
+    "roc_auc": 0.5
+  },
+  "diagnostics": {
+    "confusion_matrix": [
+      [
+        2018,
+        708
+      ],
+      [
+        623,
+        1651
+      ]
+    ],
+    "classification_report": "              precision    recall  f1-score   support\n\n        real       0.76      0.74      0.75      2726\n        fake       0.70      0.73      0.71      2274\n\n    accuracy                           0.73      5000\n   macro avg       0.73      0.73      0.73      5000\nweighted avg       0.73      0.73      0.73      5000\n",
+    "feature_importances": null,
+    "oob_score": null,
+    "hyperparameter_scores": [
+      {
+        "params": {
+          "clf__alpha": 0.0001,
+          "clf__hidden_layer_sizes": "(100,)"
+        },
+        "mean_val_score": 0.7348008385744235,
+        "std_val_score": 0.0
+      },
+      {
+        "params": {
+          "clf__alpha": 0.0001,
+          "clf__hidden_layer_sizes": "(64, 32)"
+        },
+        "mean_val_score": 0.7027027027027027,
+        "std_val_score": 0.0
+      },
+      {
+        "params": {
+          "clf__alpha": 0.001,
+          "clf__hidden_layer_sizes": "(100,)"
+        },
+        "mean_val_score": 0.7336473050758765,
+        "std_val_score": 0.0
+      },
+      {
+        "params": {
+          "clf__alpha": 0.001,
+          "clf__hidden_layer_sizes": "(64, 32)"
+        },
+        "mean_val_score": 0.7039917055469155,
+        "std_val_score": 0.0
+      }
+    ],
+    "learning_curve": {
+      "train_sizes": [
+        666,
+        1333,
+        1999,
+        2666,
+        3333
+      ],
+      "train_scores_mean": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "val_scores_mean": [
+        0.6616018807981829,
+        0.687970686303078,
+        0.6929278727932339,
+        0.6935604818448389,
+        0.703176021538895
+      ]
+    }
+  }
+}
