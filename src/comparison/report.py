@@ -26,6 +26,21 @@ def _has_row_index(table: pd.DataFrame) -> bool:
     return not isinstance(table.index, pd.RangeIndex)
 
 
+def _label_column(table: pd.DataFrame) -> Optional[str]:
+    """The column naming each row, for tables whose index is merely positional.
+
+    Leaderboard and resilience tables keep their identities ("model_name" /
+    "pipeline_used") in the first column and carry a RangeIndex, so a plot has to
+    take tick labels from that column or it labels the bars 0..N-1.
+    """
+    if _has_row_index(table):
+        return None
+    for column in table.columns:
+        if not pd.api.types.is_numeric_dtype(table[column]):
+            return column
+    return None
+
+
 def _cell(value: object) -> str:
     """Format one table cell for Markdown, rounding floats for readability."""
     return f"{value:.4f}" if isinstance(value, float) else str(value)
@@ -71,6 +86,9 @@ class Reporter:
     def plot_bar(self, path: Union[str, Path], column: Optional[str] = None) -> Optional[Path]:
         """Save a bar chart of `column` (default: first numeric column) to `path`.
 
+        Bars are labelled with the row names, taken from the identity column for
+        leaderboard/resilience tables and from the index otherwise.
+
         Returns None without writing anything when matplotlib is not installed.
         """
         if plt is None:
@@ -81,12 +99,70 @@ class Reporter:
                 return None
             column = numeric[0]
 
+        label_column = _label_column(self.table)
+        names = self.table[label_column] if label_column else self.table.index
+        labels = [str(name) for name in names]
+
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         fig, ax = plt.subplots()
-        self.table[column].plot(kind="bar", ax=ax)
+        ax.bar(range(len(labels)), self.table[column])
+        ax.set_xticks(range(len(labels)))
+        ax.set_xticklabels(labels, rotation=45, ha="right")
+        ax.set_xlabel(label_column or self.table.index.name or "")
         ax.set_ylabel(column)
         ax.set_title(self.title)
+        fig.tight_layout()
+        fig.savefig(path)
+        plt.close(fig)
+        return path
+
+    def plot_matrix(self, path: Union[str, Path]) -> Optional[Path]:
+        """Save an annotated heatmap of a model x pipeline grid to `path`.
+
+        The grid is the project's only 2-D table: a bar chart of it would show a
+        single arbitrary pipeline column, so it renders as a matrix with both axes
+        named and every populated cell annotated. Excluded pairings stay blank.
+
+        Returns None without writing anything when matplotlib is not installed or
+        the table holds no numeric cells.
+        """
+        if plt is None or self.table.empty:
+            return None
+        values = self.table.select_dtypes("number")
+        if values.empty:
+            return None
+
+        rows = [str(name) for name in values.index]
+        columns = [str(name) for name in values.columns]
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fig, ax = plt.subplots(
+            figsize=(3.0 + 0.9 * len(columns), 2.0 + 0.4 * len(rows))
+        )
+        image = ax.imshow(values, cmap="Blues", aspect="auto")
+
+        # Annotate in white on the dark end of the ramp so every value stays legible.
+        low, high = image.get_clim()
+        midpoint = low + 0.6 * (high - low)
+        for row_index, (_, row) in enumerate(values.iterrows()):
+            for column_index, value in enumerate(row):
+                if pd.isna(value):
+                    continue
+                ax.text(
+                    column_index, row_index, f"{value:.3f}",
+                    ha="center", va="center", fontsize=8,
+                    color="white" if value > midpoint else "black",
+                )
+
+        ax.set_xticks(range(len(columns)))
+        ax.set_xticklabels(columns, rotation=45, ha="right")
+        ax.set_yticks(range(len(rows)))
+        ax.set_yticklabels(rows)
+        ax.set_xlabel(values.columns.name or "")
+        ax.set_ylabel(values.index.name or "")
+        ax.set_title(self.title)
+        fig.colorbar(image, ax=ax)
         fig.tight_layout()
         fig.savefig(path)
         plt.close(fig)

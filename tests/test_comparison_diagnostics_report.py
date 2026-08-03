@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from comparison import diagnostics_report as diag_module
 from comparison.diagnostics_report import diagnostics_markdown, plot_confusion_matrix
 from comparison.records import RunRecord
@@ -81,3 +83,18 @@ class TestPlotConfusionMatrix:
         result = plot_confusion_matrix(record, tmp_path / "cm.png")
 
         assert result is None
+
+    @pytest.mark.skipif(diag_module.plt is None, reason="matplotlib is not installed")
+    def test_ticks_are_class_names_not_continuous_positions(self, tmp_path, monkeypatch):
+        record = _record({"confusion_matrix": [[2, 1], [0, 3]]})
+        captured = []
+        real_close = diag_module.plt.close
+        monkeypatch.setattr(
+            diag_module.plt, "close",
+            lambda figure: (captured.append(figure), real_close(figure)),
+        )
+        plot_confusion_matrix(record, tmp_path / "cm.png")
+        ax = captured[0].axes[0]
+
+        assert [t.get_text() for t in ax.get_xticklabels()] == ["real", "fake"]
+        assert [t.get_text() for t in ax.get_yticklabels()] == ["real", "fake"]

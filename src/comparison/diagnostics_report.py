@@ -19,6 +19,11 @@ _DIAGNOSTIC_KEYS = (
     "oob_score", "hyperparameter_scores", "learning_curve",
 )
 
+# Mirrors the 0=real / 1=fake labelling the training side records; kept local
+# because comparison/ never imports trainbase. Matrices of any other size fall
+# back to integer class indices.
+_CLASS_NAMES = ("real", "fake")
+
 
 def diagnostics_markdown(record: RunRecord) -> str:
     """Render the available diagnostics for one run as a Markdown section."""
@@ -68,13 +73,28 @@ def plot_confusion_matrix(record: RunRecord, path: Union[str, Path]) -> Optional
     if plt is None or cm is None:
         return None
 
+    labels = (
+        list(_CLASS_NAMES) if len(cm) == len(_CLASS_NAMES)
+        else [str(i) for i in range(len(cm))]
+    )
+
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     fig, ax = plt.subplots()
     im = ax.imshow(cm, cmap="Blues")
+
+    # Annotate in white on the dark end of the ramp so every count stays legible.
+    low, high = im.get_clim()
+    midpoint = low + 0.6 * (high - low)
     for i, row in enumerate(cm):
         for j, value in enumerate(row):
-            ax.text(j, i, str(value), ha="center", va="center")
+            ax.text(j, i, str(value), ha="center", va="center",
+                    color="white" if value > midpoint else "black")
+
+    ax.set_xticks(range(len(labels)))
+    ax.set_xticklabels(labels)
+    ax.set_yticks(range(len(labels)))
+    ax.set_yticklabels(labels, rotation=90, va="center")
     ax.set_title(f"Confusion matrix: {record.model_name}/{record.pipeline_used}")
     ax.set_xlabel("Predicted")
     ax.set_ylabel("True")

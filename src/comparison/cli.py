@@ -33,8 +33,9 @@ def _add_common_args(subparser: argparse.ArgumentParser) -> None:
     )
     subparser.add_argument(
         "--plot", action="store_true",
-        help="Also save PNG plots (metric bar chart, confusion matrices) if "
-        "matplotlib is installed; skipped silently otherwise.",
+        help="Also save PNG plots (a metric bar chart, or a heatmap for 'grid', "
+        "plus confusion matrices) if matplotlib is installed; skipped silently "
+        "otherwise.",
     )
 
 
@@ -83,8 +84,14 @@ def main(args: Optional[argparse.Namespace] = None) -> Path:
     (run_dir / f"{args.shape}.md").write_text(reporter.to_markdown(), encoding="utf-8")
     (run_dir / f"{args.shape}.html").write_text(reporter.to_html(), encoding="utf-8")
 
+    # The grid is a model x pipeline matrix; the other two shapes are one ranked
+    # column, so each gets the plot form that shows all of its cells.
     if args.plot:
-        reporter.plot_bar(run_dir / f"{args.shape}.png")
+        plot_path = run_dir / f"{args.shape}.png"
+        if args.shape == "grid":
+            reporter.plot_matrix(plot_path)
+        else:
+            reporter.plot_bar(plot_path)
 
     # run_id only identifies a single run for leaderboard/resilience tables, not
     # the many-celled grid, so diagnostics are only emitted for those two shapes.
