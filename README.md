@@ -1,4 +1,4 @@
-# TDSPyProject — Real vs. Fake Image Classifier
+# Deepfake-Detect — Real vs. Fake Image Classifier
 
 A from-scratch, registry-driven image-classification pipeline that distinguishes
 real photos from AI-generated/deepfake images. Every stage — image preprocessing,
