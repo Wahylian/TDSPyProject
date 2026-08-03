@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tdspyproject"
+version = "0.1.0"
+description = "Registry-driven real vs. fake image classifier."
+requires-python = ">=3.11"
+# Runtime dependencies are intentionally kept in the requirements-*.txt files,
+# not here: the GPU/CPU torch split needs the "try one wheel, else the other"
+# fallback that install.py provides and a static [project.dependencies] list
+# cannot. `pip install -e .` only wires the src/ layout onto the import path.
+
+# src/ layout: the three packages plus the four entry-point scripts live under
+# src/ and are exposed as top-level imports (matching pytest.ini's pythonpath).
+[tool.setuptools]
+package-dir = {"" = "src"}
+py-modules = ["train_model", "create_split", "extract_features", "download_dataset"]
+
+[tool.setuptools.packages.find]
+where = ["src"]

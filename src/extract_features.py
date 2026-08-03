@@ -21,8 +21,9 @@ import numpy as np
 # Valid values of the manifest's "split" column.
 VALID_SPLITS = frozenset({"train", "val", "test"})
 
-# Relative image paths resolve against this dir, not the caller's cwd.
-PROJECT_DIR = Path(__file__).resolve().parent
+# Relative image paths resolve against the repo root (this script lives in
+# src/), not the caller's cwd.
+PROJECT_DIR = Path(__file__).resolve().parent.parent
 
 # Default manifest location, matching create_split.py's default output.
 DEFAULT_CSV = PROJECT_DIR / "datasets" / "dataset_split.csv"

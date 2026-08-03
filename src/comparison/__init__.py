@@ -1,7 +1,7 @@
 """Read-side comparison package: scans artifacts/**/metadata.json and reports.
 
 Consumes metadata.json only; never imports or executes training code. See
-Docs/model_comparison_plan.md for the architecture this implements.
+docs/model_comparison_plan.md for the architecture this implements.
 """
 
 from .records import RunRecord

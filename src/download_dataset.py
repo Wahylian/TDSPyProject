@@ -42,9 +42,10 @@ def main() -> None:
     this module has no side effects — the download only runs when the script is
     executed directly.
     """
-    # Point KAGGLEHUB_CACHE at the project root so the download lands under the
-    # project's 'datasets' folder. Must be set before kagglehub is imported.
-    os.environ["KAGGLEHUB_CACHE"] = str(Path(__file__).parent)
+    # Point KAGGLEHUB_CACHE at the repo root (this script lives in src/) so the
+    # download lands under the project's 'datasets' folder. Must be set before
+    # kagglehub is imported.
+    os.environ["KAGGLEHUB_CACHE"] = str(Path(__file__).resolve().parent.parent)
     import kagglehub
 
     try:

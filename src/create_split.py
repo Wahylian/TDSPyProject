@@ -15,8 +15,9 @@ from typing import Dict
 
 import pandas as pd
 
-# Image paths are written relative to this dir so the manifest stays portable.
-PROJECT_DIR = Path(__file__).resolve().parent
+# Image paths are written relative to the repo root (this script lives in src/)
+# so the manifest stays portable.
+PROJECT_DIR = Path(__file__).resolve().parent.parent
 
 # Dataset folder (holding real/ and fake/) as laid out by download_dataset.py.
 DEFAULT_DATA_DIR = (

@@ -24,7 +24,7 @@ pipeline **by name**, so adding either is a one-line registry entry, not a code
 change.
 
 ```
-Ingestion (top-level scripts)
+Ingestion (entry-point scripts, under src/)
   download_dataset.py   -> download + restructure the Kaggle dataset to real/ + fake/
   create_split.py       -> write a seeded 70/15/15 manifest: datasets/dataset_split.csv
   extract_features.py   -> stream (image, label) pairs per split
@@ -72,14 +72,18 @@ Core dependencies: `numpy`, `pandas`, `opencv-python`, `Pillow`, `scikit-learn`,
 embeddings (runs on the torch backend — no tensorflow needed), `kagglehub` for
 the dataset download, `pytest` for tests.
 
-The project uses a flat layout (`pytest.ini` sets `pythonpath = .`), so no
-installation step is needed — run scripts from the project root.
+The project uses a `src/` layout; install it in editable mode so the packages
+are importable, then run scripts from the project root:
+
+```bash
+pip install -e .
+```
 
 ## 4. Prepare the dataset
 
 ```bash
-python download_dataset.py     # downloads + restructures into datasets/.../real, fake
-python create_split.py         # writes the seeded manifest: datasets/dataset_split.csv
+python src/download_dataset.py     # downloads + restructures into datasets/.../real, fake
+python src/create_split.py         # writes the seeded manifest: datasets/dataset_split.csv
 ```
 
 `download_dataset.py` performs the network download only when run directly
@@ -92,16 +96,16 @@ python create_split.py         # writes the seeded manifest: datasets/dataset_sp
 
 ```bash
 # Random Forest on the fast (64x64) pipeline:
-python train_model.py --model rf --pipeline fast
+python src/train_model.py --model rf --pipeline fast
 
 # SVM on the default svm pipeline, capping sample sizes (0 = use all):
-python train_model.py --model svm --max-train-samples 5000 --max-test-samples 5000
+python src/train_model.py --model svm --max-train-samples 5000 --max-test-samples 5000
 
 # Add the (more expensive) sample-size learning curve to the diagnostics:
-python train_model.py --model rf --diagnostics
+python src/train_model.py --model rf --diagnostics
 
 # Fully custom feature pipeline (inline JSON; include reduce/scale yourself):
-python train_model.py --model svm --pipeline-spec '[
+python src/train_model.py --model svm --pipeline-spec '[
   ["grayscale", {}],
   ["resize", {"target_size": [128, 128], "preserve_aspect": true}],
   ["normalize", {"method": "minmax"}],

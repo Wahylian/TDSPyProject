@@ -22,7 +22,7 @@ def _add_common_args(subparser: argparse.ArgumentParser) -> None:
     subparser.add_argument("--root", default="artifacts", help="Artifacts root to scan.")
     subparser.add_argument("--metric", default="f1", help="Metric to rank/pivot on.")
     subparser.add_argument(
-        "--output-dir", default="Docs/reports",
+        "--output-dir", default="reports",
         help="Reports are written to <output-dir>/<timestamp>/.",
     )
     subparser.add_argument(
