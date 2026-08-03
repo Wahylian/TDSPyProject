@@ -12,11 +12,6 @@
 .idea
 .claude
 
-# Tooling scratch (Serena MCP config/cache; Superpowers workflow ledger).
-# Specs/plans are committed under Docs/ and are intentionally NOT ignored.
-.serena/
-.superpowers/
-
 # Local project memory
 MEMORY.md
 

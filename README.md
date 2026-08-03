@@ -1,4 +1,4 @@
-# TDSPyProject — Real vs. Fake Image Classifier
+# Deepfake-Detect — Real vs. Fake Image Classifier
 
 A from-scratch, registry-driven image-classification pipeline that distinguishes
 real photos from AI-generated/deepfake images. Every stage — image preprocessing,
@@ -24,10 +24,30 @@ Given a folder of `real/` and `fake/` images, the project:
 The design is registry-driven: a run selects a model and a feature pipeline
 **by name**, so adding either is a new registry entry, not a new code path.
 
-## 2. Architecture
+## 2. Project Layout
+
+A standard `src/` layout: all importable code lives under `src/`, and the
+generated data, run artifacts, and comparison reports each have their own
+top-level directory.
 
 ```
-Ingestion (top-level scripts)
+TDSPyProject/
+├── src/                    -> all importable code (see the breakdown below)
+├── tests/                  -> pytest suite (synthetic fixtures; no data/network)
+├── datasets/               -> raw dataset + manifest CSV (git-ignored, created by the ingestion scripts)
+├── artifacts/              -> per-run bundles: artifacts/<model>/<run_id>/
+├── reports/                -> comparison output: reports/<timestamp>/
+├── docs/                   -> design docs (project_guide.md, specs/plans)
+├── pyproject.toml          -> packaging for the src/ layout (`pip install -e .`)
+├── pytest.ini              -> pythonpath = src, markers, discovery
+├── requirements*.txt       -> dependency sets (base / GPU / CPU)
+└── install.py              -> GPU-then-CPU torch install fallback
+```
+
+### `src/` breakdown
+
+```
+Ingestion (entry-point scripts)
   download_dataset.py    -> download + restructure the Kaggle dataset into real/ + fake/
   create_split.py        -> write a seeded 70/15/15 manifest: datasets/dataset_split.csv
   extract_features.py    -> stream (image, label) pairs per split from the manifest
@@ -98,13 +118,13 @@ everything --> build_metadata --> save_artifacts --> artifacts/<model>/<run_id>/
 
 ## 3. Setup & Installation
 
-The project uses a flat layout (`pytest.ini` sets `pythonpath = .`), so no
-package install step is needed — run scripts from the project root with the
-dependencies below installed into your Python environment (a virtualenv is
-recommended).
+Install the dependencies, then install the project in editable mode so the
+`src/` layout is on the import path (this is what lets `python -m comparison`
+and the `trainbase`/`preprocessing`/`comparison` imports resolve from the repo
+root). A virtualenv is recommended.
 
 ```bash
-# Default: core deps + the GPU (CUDA) torch/torchvision build.
+# 1. Dependencies. Default: core deps + the GPU (CUDA) torch/torchvision build.
 pip install -r requirements.txt
 
 # No NVIDIA/CUDA GPU, or the cu126 wheels aren't available for your platform?
@@ -112,6 +132,10 @@ pip install -r requirements-cpu.txt
 
 # Or let it try GPU first and fall back to CPU automatically:
 python install.py
+
+# 2. The project itself (src/ layout, editable). Pulls no dependencies of its
+#    own — it only wires src/ onto the import path.
+pip install -e .
 ```
 
 `pip` has no built-in "try this wheel, else that one" logic, so
@@ -125,37 +149,73 @@ without it — uncomment the matching line in `requirements.txt`, or install dir
 | Extra | Enables | Install |
 |---|---|---|
 | `keras` (torch backend, no tensorflow) | VGG16 embedding pipelines | `pip install keras` |
-| `kagglehub` | `download_dataset.py` | `pip install kagglehub` |
+| `kagglehub` | `src/download_dataset.py` | `pip install kagglehub` |
 | `pytest` | running the test suite | `pip install pytest` |
 
 ## 4. Usage
 
+Run every command from the repo root. The ingestion and training scripts live
+under `src/`, so they are invoked as `python src/<script>.py`; the comparison
+package is invoked as a module (`python -m comparison`), which works from the
+root once `pip install -e .` has run.
+
 ### Prepare the dataset
 
 ```bash
-python download_dataset.py     # downloads + restructures the Kaggle dataset into real/, fake/
-python create_split.py         # writes the seeded manifest: datasets/dataset_split.csv
+python src/download_dataset.py     # downloads + restructures the Kaggle dataset into real/, fake/
+python src/create_split.py         # writes the seeded manifest: datasets/dataset_split.csv
 ```
 
 `download_dataset.py` only touches the network when run directly (importing it
 has no side effects) and needs Kaggle credentials configured for `kagglehub`.
 
-### Train a model
+### Generate the run artifacts
+
+Every artifact bundle under `artifacts/<model>/<run_id>/` is produced by a
+`train_model.py` run. The complete, authoritative set of those commands — the 16
+baseline exploratory runs plus the 53 full-matrix cells (69 valid model ×
+pipeline pairings) — lives in a single batch script,
+[`scripts/generate_artifacts.sh`](scripts/generate_artifacts.sh). Prepare the
+dataset first (above), then run the whole batch:
+
+```bash
+# Linux / macOS / CI:
+bash scripts/generate_artifacts.sh
+```
+
+On Windows, `bash` resolves to WSL2 and cannot see the Windows `.venv`, so drive
+the commands through PowerShell instead (comment and blank lines are filtered
+out):
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+Get-Content scripts/generate_artifacts.sh |
+  Where-Object { $_.Trim() -and -not $_.Trim().StartsWith('#') } |
+  ForEach-Object { Write-Host ">>> $_"; Invoke-Expression $_ }
+```
+
+`--scoring f1` is the default, `--diagnostics` is limited to the `mlp` rows, and
+`--max-train-samples 5000` / `RANDOM_STATE=42` are left at their defaults so
+every cell shares one train/val/test budget and seed. The feature cache
+(`--cache-dir feature_cache`, on by default) means each pipeline's extraction
+cost is paid once and amortized across its column.
+
+### Train a single model
 
 `train_model.py` is the single training entry point; `--model` is required.
 
 ```bash
 # Random Forest on the fast (64x64) pipeline:
-python train_model.py --model rf --pipeline fast
+python src/train_model.py --model rf --pipeline fast
 
 # SVM on the default pipeline, capping sample sizes (0 = use all):
-python train_model.py --model svm --max-train-samples 5000 --max-test-samples 5000
+python src/train_model.py --model svm --max-train-samples 5000 --max-test-samples 5000
 
 # A from-scratch CNN on raw pixels, with the extra learning-curve diagnostic:
-python train_model.py --model cnn --pipeline pixels --diagnostics
+python src/train_model.py --model cnn --pipeline pixels --diagnostics
 
 # Fully custom feature pipeline (inline JSON; include reduce/scale yourself):
-python train_model.py --model svm --pipeline-spec '[
+python src/train_model.py --model svm --pipeline-spec '[
   ["grayscale", {}],
   ["resize", {"target_size": [128, 128], "preserve_aspect": true}],
   ["normalize", {"method": "minmax"}],
@@ -181,7 +241,7 @@ Inference from a raw image reuses both artifacts:
 
 `python -m comparison` reads every `artifacts/**/metadata.json` and writes
 Markdown/HTML/CSV reports (plus optional PNG plots) to a timestamped directory
-under `Docs/reports/`. It never touches training code, so it is safe to re-run
+under `reports/`. It never touches training code, so it is safe to re-run
 at any time. Three evaluation shapes, one subcommand each:
 
 | Shape | Subcommand | Question it answers |
@@ -239,7 +299,7 @@ python -m comparison grid --metric roc_auc
 python -m comparison grid --metric accuracy --plot
 
 # Scan an alternate artifacts root and write elsewhere:
-python -m comparison grid --root artifacts --output-dir Docs/reports/full_matrix
+python -m comparison grid --root artifacts --output-dir reports/full_matrix
 ```
 
 **Flags** (shared by all three shapes):
@@ -248,7 +308,7 @@ python -m comparison grid --root artifacts --output-dir Docs/reports/full_matrix
 |---|---|---|
 | `--root` | `artifacts` | Artifacts root to scan. |
 | `--metric` | `f1` | Ranks/pivots on `accuracy`, `precision`, `recall`, `f1`, `pr_auc`, or `roc_auc`. |
-| `--output-dir` | `Docs/reports` | Reports land in `<output-dir>/<timestamp>/`. |
+| `--output-dir` | `reports` | Reports land in `<output-dir>/<timestamp>/`. |
 | `--diagnostics` | off | Adds confusion matrix, hyperparameter scores, importances/OOB, and learning curve per run shown. |
 | `--plot` | off | Saves PNG plots when `matplotlib` is installed; skipped silently otherwise. |
 
@@ -262,17 +322,19 @@ model returns a single row, since each deep tier has exactly one legal pipeline.
 python -m pytest -q
 ```
 
-Tests run against tiny, seeded, in-memory fixtures — no dataset, network, or
-GPU required — and cover the preprocessing API, both registries, feature
-extraction/caching, tuning, evaluation, diagnostics, artifact persistence, and
-the comparison package. Optional-dependency paths (torch, torchvision, keras)
-are skipped automatically when that dependency isn't installed. Slower tests
-(real torch model fits) are marked `slow` and can be excluded:
+`pytest.ini` sets `pythonpath = src`, so the suite runs whether or not
+`pip install -e .` has been done. Tests run against tiny, seeded, in-memory
+fixtures — no dataset, network, or GPU required — and cover the preprocessing
+API, both registries, feature extraction/caching, tuning, evaluation,
+diagnostics, artifact persistence, and the comparison package.
+Optional-dependency paths (torch, torchvision, keras) are skipped automatically
+when that dependency isn't installed. Slower tests (real torch model fits) are
+marked `slow` and can be excluded:
 
 ```bash
 python -m pytest -q -m "not slow"
 ```
 
-CI (`.github/workflows/test.yml`) runs the full suite on Ubuntu with the CPU
-torch build and `keras` installed, so both optional-dependency paths are
-exercised on every push and pull request.
+CI (`.github/workflows/test.yml`) installs the project (`pip install -e .`) and
+runs the full suite on Ubuntu with the CPU torch build and `keras` installed, so
+both optional-dependency paths are exercised on every push and pull request.

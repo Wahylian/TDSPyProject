@@ -30,5 +30,8 @@ jobs:
           pip install keras
           pip install torch --index-url https://download.pytorch.org/whl/cpu
 
+      - name: Install project (src/ layout, editable)
+        run: pip install -e .
+
       - name: Run tests
         run: pytest
